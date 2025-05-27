@@ -4,25 +4,19 @@ let lockPosition = null;
 let reverseMapping = false;
 let watchId = null;
 let orientationActive = false;
-let micActive = false;
-let cameraActive = false;
 let motionActive = false;
+let cameraActive = false;
 
 let baseFreq = 440;
 let freqRange = 200;
 let modRate = 10;
 let waveform = 'sine';
 
-let distanceHistory = [];
-let betaHistory = [];
-
 const statusEl = document.getElementById("status");
-const canvas = document.getElementById("visualCanvas");
-const canvasCtx = canvas?.getContext("2d");
 
 function log(msg) {
   console.log(msg);
-  if (statusEl) statusEl.textContent = "Status: " + msg; // Fallback to concatenation
+  if (statusEl) statusEl.textContent = "Status: " + msg;
 }
 
 async function initAudio() {
@@ -36,9 +30,20 @@ async function initAudio() {
       log("Audio context resumed");
     }
 
-    if (carrierOsc) carrierOsc.stop();
-    if (modulatorOsc) modulatorOsc.stop();
+    // Clean up existing oscillators
+    if (carrierOsc) {
+      carrierOsc.stop();
+      carrierOsc.disconnect();
+    }
+    if (modulatorOsc) {
+      modulatorOsc.stop();
+      modulatorOsc.disconnect();
+    }
+    if (modGain) {
+      modGain.disconnect();
+    }
 
+    // Create new audio nodes
     carrierOsc = audioCtx.createOscillator();
     carrierOsc.type = waveform;
     carrierOsc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
@@ -77,11 +82,9 @@ function updateModulation(distance) {
     : (mapped / 100) * freqRange;
 
   const now = audioCtx.currentTime;
-  modGain.gain.setValueAtTime(modDepthHz, now);
-  carrierOsc.frequency.setValueAtTime(baseFreq, now);
-  distanceHistory.push({ time: now, distance });
-  if (distanceHistory.length > 100) distanceHistory.shift();
-  updateVisualization();
+  // Smooth transitions to avoid clicks
+  modGain.gain.linearRampToValueAtTime(modDepthHz, now + 0.02);
+  carrierOsc.frequency.linearRampToValueAtTime(baseFreq, now + 0.02);
 }
 
 async function startGpsTracking() {
@@ -174,16 +177,15 @@ function handleOrientation(event) {
   const modRateOffset = (beta / 180) * maxModRateChange;
   const adjustedModRate = modRate + modRateOffset;
   const finalModRate = Math.max(0.1, Math.min(50, adjustedModRate));
-  modulatorOsc.frequency.setValueAtTime(finalModRate, audioCtx.currentTime);
+  // Smooth transition
+  modulatorOsc.frequency.linearRampToValueAtTime(finalModRate, audioCtx.currentTime + 0.02);
   document.getElementById("modRateValue").textContent = finalModRate.toFixed(1) + " Hz (Tilt: " + beta.toFixed(1) + "°)";
-  betaHistory.push({ time: audioCtx.currentTime, beta });
-  if (betaHistory.length > 100) betaHistory.shift();
-  updateVisualization();
 }
 
 async function requestOrientationPermission() {
   if (typeof DeviceOrientationEvent.requestPermission === "function") {
     try {
+      await audioCtx.resume(); // Ensure audio context is active
       const permission = await DeviceOrientationEvent.requestPermission();
       if (permission === "granted") {
         orientationActive = true;
@@ -196,47 +198,16 @@ async function requestOrientationPermission() {
       log("Orientation error: " + err.message);
     }
   } else {
+    await audioCtx.resume();
     orientationActive = true;
     window.addEventListener("deviceorientation", handleOrientation);
     log("Orientation enabled. Tilt device to adjust modulator frequency.");
   }
 }
 
-async function initMicrophone() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const source = audioCtx.createMediaStreamSource(stream);
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
-    source.connect(analyser);
-    const dataArray = new Float32Array(analyser.fftSize);
-
-    function processMic() {
-      if (!micActive) return;
-      analyser.getFloatTimeDomainData(dataArray);
-      let sum = 0;
-      for (let i = 0; i < dataArray.length; i++) {
-        sum += dataArray[i] ** 2;
-      }
-      const rms = Math.sqrt(sum / dataArray.length);
-      const maxBaseFreqChange = 100;
-      const adjustedBaseFreq = baseFreq + rms * maxBaseFreqChange * 100;
-      const finalBaseFreq = Math.max(100, Math.min(1000, adjustedBaseFreq));
-      if (carrierOsc) {
-        carrierOsc.frequency.setValueAtTime(finalBaseFreq, audioCtx.currentTime);
-        document.getElementById("baseFreqValue").textContent = finalBaseFreq.toFixed(1) + " Hz (Mic: " + (rms * 100).toFixed(1) + ")";
-      }
-      requestAnimationFrame(processMic);
-    }
-    processMic();
-    log("Microphone initialized");
-  } catch (err) {
-    log("Microphone error: " + err.message);
-  }
-}
-
 async function initCamera() {
   try {
+    await audioCtx.resume(); // Ensure audio context is active
     const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
     const video = document.getElementById("video");
     video.srcObject = stream;
@@ -245,8 +216,16 @@ async function initCamera() {
     canvas.height = 100;
     const ctx = canvas.getContext("2d");
 
-    function processCamera() {
+    let lastUpdate = 0;
+    function processCamera(timestamp) {
       if (!cameraActive) return;
+      // Throttle to ~10 FPS
+      if (timestamp - lastUpdate < 100) {
+        requestAnimationFrame(processCamera);
+        return;
+      }
+      lastUpdate = timestamp;
+
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       let sum = 0;
@@ -259,12 +238,13 @@ async function initCamera() {
       const adjustedFreqRange = normalizedBrightness * 500;
       const finalFreqRange = Math.max(0, Math.min(500, adjustedFreqRange));
       if (modGain) {
-        modGain.gain.setValueAtTime(finalFreqRange, audioCtx.currentTime);
+        // Smooth transition
+        modGain.gain.linearRampToValueAtTime(finalFreqRange, audioCtx.currentTime + 0.02);
         document.getElementById("modRangeValue").textContent = finalFreqRange.toFixed(1) + " Hz (Brightness: " + avgBrightness.toFixed(1) + ")";
       }
       requestAnimationFrame(processCamera);
     }
-    video.onloadedmetadata = () => processCamera();
+    video.onloadedmetadata = () => requestAnimationFrame(processCamera);
     log("Camera initialized");
   } catch (err) {
     log("Camera error: " + err.message);
@@ -274,6 +254,7 @@ async function initCamera() {
 async function requestMotionPermission() {
   if (typeof DeviceMotionEvent.requestPermission === "function") {
     try {
+      await audioCtx.resume(); // Ensure audio context is active
       const permission = await DeviceMotionEvent.requestPermission();
       if (permission === "granted") {
         motionActive = true;
@@ -286,6 +267,7 @@ async function requestMotionPermission() {
       log("Motion error: " + err.message);
     }
   } else {
+    await audioCtx.resume();
     motionActive = true;
     window.addEventListener("devicemotion", handleMotion);
     log("Motion enabled. Shake device to adjust modulation depth.");
@@ -304,54 +286,9 @@ function handleMotion(event) {
   const mappedMagnitude = Math.min(magnitude, 10);
   const adjustedFreqRange = (mappedMagnitude / 10) * maxFreqRangeChange;
   const finalFreqRange = Math.max(0, Math.min(500, adjustedFreqRange));
-  modGain.gain.setValueAtTime(finalFreqRange, audioCtx.currentTime);
+  // Smooth transition
+  modGain.gain.linearRampToValueAtTime(finalFreqRange, audioCtx.currentTime + 0.02);
   document.getElementById("modRangeValue").textContent = finalFreqRange.toFixed(1) + " Hz (Shake: " + magnitude.toFixed(1) + "g)";
-}
-
-function updateVisualization() {
-  if (!canvasCtx) return;
-  const visType = document.getElementById("visualization").value;
-  canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-  canvasCtx.strokeStyle = "#333";
-  canvasCtx.lineWidth = 2;
-
-  if (visType === "waveform" && audioCtx && carrierOsc) {
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
-    carrierOsc.connect(analyser);
-    const dataArray = new Float32Array(analyser.fftSize);
-    analyser.getFloatTimeDomainData(dataArray);
-    canvasCtx.beginPath();
-    for (let i = 0; i < dataArray.length; i++) {
-      const x = (i / dataArray.length) * canvas.width;
-      const y = (0.5 + dataArray[i] * 0.5) * canvas.height;
-      if (i === 0) canvasCtx.moveTo(x, y);
-      else canvasCtx.lineTo(x, y);
-    }
-    canvasCtx.stroke();
-    analyser.disconnect();
-  } else if (visType === "distance" && distanceHistory.length > 1) {
-    canvasCtx.beginPath();
-    const maxDistance = Math.max(...distanceHistory.map(d => d.distance), 100);
-    for (let i = 0; i < distanceHistory.length; i++) {
-      const x = (i / (distanceHistory.length - 1)) * canvas.width;
-      const y = canvas.height * (1 - distanceHistory[i].distance / maxDistance);
-      if (i === 0) canvasCtx.moveTo(x, y);
-      else canvasCtx.lineTo(x, y);
-    }
-    canvasCtx.stroke();
-  } else if (visType === "orientation" && betaHistory.length > 1) {
-    canvasCtx.beginPath();
-    const maxBeta = 180;
-    for (let i = 0; i < betaHistory.length; i++) {
-      const x = (i / (betaHistory.length - 1)) * canvas.width;
-      const y = canvas.height * (1 - (betaHistory[i].beta + maxBeta) / (2 * maxBeta));
-      if (i === 0) canvasCtx.moveTo(x, y);
-      else canvasCtx.lineTo(x, y);
-    }
-    canvasCtx.stroke();
-  }
-  requestAnimationFrame(updateVisualization);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -359,23 +296,22 @@ document.addEventListener("DOMContentLoaded", () => {
   const testBtn = document.getElementById("testBtn");
   const toggleDirectionBtn = document.getElementById("toggleDirectionBtn");
   const orientationBtn = document.getElementById("orientationBtn");
-  const micBtn = document.getElementById("micBtn");
-  const cameraBtn = document.getElementById("cameraBtn");
   const motionBtn = document.getElementById("motionBtn");
+  const cameraBtn = document.getElementById("cameraBtn");
   const baseFreqInput = document.getElementById("baseFreq");
   const modRangeInput = document.getElementById("modRange");
   const modRateInput = document.getElementById("modRate");
   const waveformSelect = document.getElementById("waveform");
-  const visSelect = document.getElementById("visualization");
 
-  if (!lockBtn || !testBtn || !toggleDirectionBtn || !orientationBtn || !micBtn || !cameraBtn || !motionBtn || !baseFreqInput || !modRangeInput || !modRateInput || !waveformSelect || !visSelect || !canvas) {
+  if (!lockBtn || !testBtn || !toggleDirectionBtn || !orientationBtn || !motionBtn || !cameraBtn || !baseFreqInput || !modRangeInput || !modRateInput || !waveformSelect) {
     log("One or more UI elements not found. Check HTML IDs.");
-    console.error("Missing elements:", { lockBtn, testBtn, toggleDirectionBtn, orientationBtn, micBtn, cameraBtn, motionBtn, baseFreqInput, modRangeInput, modRateInput, waveformSelect, visSelect, canvas });
+    console.error("Missing elements:", { lockBtn, testBtn, toggleDirectionBtn, orientationBtn, motionBtn, cameraBtn, baseFreqInput, modRangeInput, modRateInput, waveformSelect });
     return;
   }
 
   lockBtn.addEventListener("click", async () => {
     console.log("Lock GPS button clicked");
+    await audioCtx?.resume();
     log("Initializing audio and GPS...");
     const audioSuccess = await initAudio();
     if (!audioSuccess) return;
@@ -384,17 +320,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
   testBtn.addEventListener("click", async () => {
     console.log("Test Audio button clicked");
+    await audioCtx?.resume();
     const audioSuccess = await initAudio();
     if (audioSuccess) updateModulation(10);
   });
 
-  toggleDirectionBtn.addEventListener("click", () => {
+  toggleDirectionBtn.addEventListener("click", async () => {
+    await audioCtx?.resume();
     reverseMapping = !reverseMapping;
     log("Frequency mapping " + (reverseMapping ? "reversed" : "normal"));
   });
 
-  orientationBtn.addEventListener("click", () => {
+  orientationBtn.addEventListener("click", async () => {
     console.log("Enable Orientation button clicked");
+    await audioCtx?.resume();
     orientationActive = !orientationActive;
     if (orientationActive) {
       requestOrientationPermission();
@@ -404,18 +343,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  micBtn.addEventListener("click", () => {
-    console.log("Toggle Microphone button clicked");
-    micActive = !micActive;
-    if (micActive) {
-      initMicrophone();
-    } else {
-      log("Microphone disabled");
-    }
-  });
-
-  cameraBtn.addEventListener("click", () => {
+  cameraBtn.addEventListener("click", async () => {
     console.log("Toggle Camera button clicked");
+    await audioCtx?.resume();
     cameraActive = !cameraActive;
     if (cameraActive) {
       initCamera();
@@ -428,8 +358,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  motionBtn.addEventListener("click", () => {
+  motionBtn.addEventListener("click", async () => {
     console.log("Toggle Accelerometer button clicked");
+    await audioCtx?.resume();
     motionActive = !motionActive;
     if (motionActive) {
       requestMotionPermission();
@@ -439,33 +370,39 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  baseFreqInput.addEventListener("input", (e) => {
+  baseFreqInput.addEventListener("input", async (e) => {
+    await audioCtx?.resume();
     baseFreq = parseFloat(e.target.value);
     document.getElementById("baseFreqValue").textContent = baseFreq + " Hz";
-    if (carrierOsc) carrierOsc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
+    if (carrierOsc) {
+      carrierOsc.frequency.linearRampToValueAtTime(baseFreq, audioCtx.currentTime + 0.02);
+    }
   });
 
-  modRangeInput.addEventListener("input", (e) => {
+  modRangeInput.addEventListener("input", async (e) => {
+    await audioCtx?.resume();
     freqRange = parseFloat(e.target.value);
     document.getElementById("modRangeValue").textContent = freqRange + " Hz";
-    if (modGain) modGain.gain.setValueAtTime(freqRange, audioCtx.currentTime);
+    if (modGain) {
+      modGain.gain.linearRampToValueAtTime(freqRange, audioCtx.currentTime + 0.02);
+    }
   });
 
-  modRateInput.addEventListener("input", (e) => {
+  modRateInput.addEventListener("input", async (e) => {
+    await audioCtx?.resume();
     modRate = parseFloat(e.target.value);
     document.getElementById("modRateValue").textContent = modRate + " Hz";
-    if (modulatorOsc) modulatorOsc.frequency.setValueAtTime(modRate, audioCtx.currentTime);
+    if (modulatorOsc) {
+      modulatorOsc.frequency.linearRampToValueAtTime(modRate, audioCtx.currentTime + 0.02);
+    }
   });
 
-  waveformSelect.addEventListener("change", (e) => {
+  waveformSelect.addEventListener("change", async (e) => {
+    await audioCtx?.resume();
     waveform = e.target.value;
-    if (carrierOsc) carrierOsc.type = waveform;
+    if (carrierOsc) {
+      carrierOsc.type = waveform;
+    }
     log("Waveform changed to " + waveform);
   });
-
-  visSelect.addEventListener("change", () => {
-    updateVisualization();
-  });
-
-  updateVisualization();
 });
