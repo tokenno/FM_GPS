@@ -12,7 +12,6 @@ let baseFreq = 440;
 let freqRange = 200;
 let modRate = 4;
 let waveform = 'sine';
-let maxDistance = 50;
 
 const statusEl = document.getElementById("status");
 let compassSection = null;
@@ -24,9 +23,11 @@ function log(msg) {
   console.log(msg);
   if (statusEl) {
     statusEl.textContent = "Status: " + msg;
-    statusEl.className = msg.includes("error") || msg.includes("denied") || msg.includes("unavailable")
-      ? "status error"
-      : "status success";
+    if (msg.includes("error") || msg.includes("denied") || msg.includes("unavailable")) {
+      statusEl.className = "status error";
+    } else {
+      statusEl.className = "status success";
+    }
   }
 }
 
@@ -85,10 +86,10 @@ function updateModulation(distance) {
     return;
   }
   
-  const scaledDistance = Math.min(distance / maxDistance, 1) * 100;
+  const mapped = Math.min(Math.max(Math.log10(distance + 1) * 100, 0), 100);
   const modDepthHz = reverseMapping 
-    ? ((100 - scaledDistance) / 100) * freqRange 
-    : (scaledDistance / 100) * freqRange;
+    ? ((100 - mapped) / 100) * freqRange 
+    : (mapped / 100) * freqRange;
 
   const now = audioCtx.currentTime;
   modGain.gain.linearRampToValueAtTime(modDepthHz, now + 0.02);
@@ -346,48 +347,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const modRangeInput = document.getElementById("modRange");
   const modRateInput = document.getElementById("modRate");
   const waveformSelect = document.getElementById("waveform");
-  const maxDistanceSelect = document.getElementById("maxDistance");
 
   compassSection = document.getElementById("compass-section");
   compassSvg = document.getElementById("compass");
   directionArrow = document.getElementById("direction-arrow");
   distanceDisplay = document.getElementById("distance-display");
 
-  if (!lockBtn || !testBtn || !toggleDirectionBtn || !orientationBtn || !motionBtn || !cameraBtn || !baseFreqInput || !modRangeInput || !modRateInput || !waveformSelect || !maxDistanceSelect || !compassSection || !compassSvg || !directionArrow || !distanceDisplay) {
+  if (!lockBtn || !testBtn || !toggleDirectionBtn || !orientationBtn || !motionBtn || !cameraBtn || !baseFreqInput || !modRangeInput || !modRateInput || !waveformSelect) {
     log("One or more UI elements not found. Check HTML IDs.");
-    console.error("Missing elements:", {
-      lockBtn: !!lockBtn,
-      testBtn: !!testBtn,
-      toggleDirectionBtn: !!toggleDirectionBtn,
-      orientationBtn: !!orientationBtn,
-      motionBtn: !!motionBtn,
-      cameraBtn: !!cameraBtn,
-      baseFreqInput: !!baseFreqInput,
-      modRangeInput: !!modRangeInput,
-      modRateInput: !!modRateInput,
-      waveformSelect: !!waveformSelect,
-      maxDistanceSelect: !!maxDistanceSelect,
-      compassSection: !!compassSection,
-      compassSvg: !!compassSvg,
-      directionArrow: !!directionArrow,
-      distanceDisplay: !!distanceDisplay
-    });
+    console.error("Missing elements:", { lockBtn, testBtn, toggleDirectionBtn, orientationBtn, motionBtn, cameraBtn, baseFreqInput, modRangeInput, modRateInput, waveformSelect });
     return;
   }
-
-  baseFreqInput.value = baseFreq;
-  document.getElementById("baseFreqValue").textContent = baseFreq + " Hz";
-  baseFreqInput.setAttribute("aria-valuenow", baseFreq);
-
-  modRangeInput.value = freqRange;
-  document.getElementById("modRangeValue").textContent = freqRange + " Hz";
-  modRangeInput.setAttribute("aria-valuenow", freqRange);
-
-  modRateInput.value = modRate;
-  document.getElementById("modRateValue").textContent = modRate + " Hz";
-  modRateInput.setAttribute("aria-valuenow", modRate);
-
-  maxDistanceSelect.value = maxDistance;
 
   lockBtn.addEventListener("click", async () => {
     console.log("Lock GPS button clicked");
@@ -488,17 +458,5 @@ document.addEventListener("DOMContentLoaded", () => {
       carrierOsc.type = waveform;
     }
     log("Waveform changed to " + waveform);
-  });
-
-  maxDistanceSelect.addEventListener("change", async (e) => {
-    await audioCtx?.resume();
-    maxDistance = parseFloat(e.target.value);
-    log(`Maximum distance set to ${maxDistance}m`);
-    if (lockPosition) {
-      navigator.geolocation.getCurrentPosition(pos => {
-        const distance = calculateDistance(pos.coords, lockPosition);
-        updateModulation(distance);
-      });
-    }
   });
 });
