@@ -194,13 +194,28 @@
     video {
       display: none;
     }
+    #compass-section {
+      text-align: center;
+    }
+    #compass {
+      transition: transform 0.3s ease;
+      margin: 0 auto;
+    }
+    #direction-arrow {
+      marker-end: url(#arrowhead);
+    }
+    #distance-display {
+      font-weight: bold;
+      font-size: 1.2rem;
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>GPSSynthesizer</h1>
-<br>   <h1>tOkenoApps</h1>
+    <h1>tOkenoApps</h1>
   </header>
+ 
 
   <div id="status" class="status" role="status" aria-live="polite">Status: Ready</div>
 
@@ -258,6 +273,20 @@
         <option value="sawtooth">Sawtooth</option>
       </select>
     </div>
+  </section>
+
+  <section id="compass-section" style="display: none;">
+    <h2>Navigation</h2>
+    <div style="text-align: center; margin: 20px 0;">
+      <svg id="compass" width="200" height="200" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="90" fill="none" stroke="#4299e1" stroke-width="2"/>
+        <circle cx="100" cy="100" r="80" fill="#edf2f7"/>
+        <line id="direction-arrow" x1="100" y1="100" x2="100" y2="30" stroke="#e53e3e" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="100" cy="100" r="10" fill="#e53e3e"/>
+        <text x="100" y="60" text-anchor="middle" fill="#2d3748" font-size="14" id="distance-display">0m</text>
+      </svg>
+    </div>
+      
   </section>
 
   <video id="video" autoplay></video>

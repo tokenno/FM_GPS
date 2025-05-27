@@ -6,19 +6,23 @@ let watchId = null;
 let orientationActive = false;
 let motionActive = false;
 let cameraActive = false;
+let currentHeading = 0;
 
 let baseFreq = 440;
 let freqRange = 200;
-let modRate = 10;
+let modRate = 4;
 let waveform = 'sine';
 
 const statusEl = document.getElementById("status");
+let compassSection = null;
+let compassSvg = null;
+let directionArrow = null;
+let distanceDisplay = null;
 
 function log(msg) {
   console.log(msg);
   if (statusEl) {
     statusEl.textContent = "Status: " + msg;
-    // Add success or error class based on message content
     if (msg.includes("error") || msg.includes("denied") || msg.includes("unavailable")) {
       statusEl.className = "status error";
     } else {
@@ -38,7 +42,6 @@ async function initAudio() {
       log("Audio context resumed");
     }
 
-    // Clean up existing oscillators
     if (carrierOsc) {
       carrierOsc.stop();
       carrierOsc.disconnect();
@@ -51,7 +54,6 @@ async function initAudio() {
       modGain.disconnect();
     }
 
-    // Create new audio nodes
     carrierOsc = audioCtx.createOscillator();
     carrierOsc.type = waveform;
     carrierOsc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
@@ -94,6 +96,28 @@ function updateModulation(distance) {
   carrierOsc.frequency.linearRampToValueAtTime(baseFreq, now + 0.02);
 }
 
+function updateCompassDisplay(distance, bearing) {
+  if (!compassSection || !directionArrow || !distanceDisplay) return;
+  
+  const arrowRotation = bearing - currentHeading;
+  directionArrow.setAttribute('transform', `rotate(${-arrowRotation}, 100, 100)`);
+  distanceDisplay.textContent = `${distance.toFixed(0)}m`;
+}
+
+function calculateBearing(coords1, coords2) {
+  const φ1 = coords1.latitude * Math.PI / 180;
+  const φ2 = coords2.latitude * Math.PI / 180;
+  const λ1 = coords1.longitude * Math.PI / 180;
+  const λ2 = coords2.longitude * Math.PI / 180;
+  
+  const y = Math.sin(λ2 - λ1) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - 
+            Math.sin(φ1) * Math.cos(φ2) * Math.cos(λ2 - λ1);
+  const θ = Math.atan2(y, x);
+  
+  return (θ * 180 / Math.PI + 360) % 360;
+}
+
 async function startGpsTracking() {
   if (!navigator.geolocation) {
     log("Geolocation not supported by this browser or device.");
@@ -125,6 +149,11 @@ async function startGpsTracking() {
         }
         const distance = calculateDistance(pos.coords, lockPosition);
         updateModulation(distance);
+        
+        if (currentHeading !== null) {
+          const bearing = calculateBearing(pos.coords, lockPosition);
+          updateCompassDisplay(distance, bearing);
+        }
       },
       err => {
         if (err.code === 1) {
@@ -175,17 +204,30 @@ function handleOrientation(event) {
   if (!orientationActive || !modulatorOsc) return;
 
   const beta = event.beta;
-  if (beta === null) {
+  const gamma = event.gamma;
+  const alpha = event.alpha;
+  
+  if (beta === null || gamma === null || alpha === null) {
     log("Orientation data unavailable");
     return;
   }
 
+  currentHeading = alpha;
+  
   const maxModRateChange = 5;
   const modRateOffset = (beta / 180) * maxModRateChange;
   const adjustedModRate = modRate + modRateOffset;
   const finalModRate = Math.max(0.1, Math.min(50, adjustedModRate));
   modulatorOsc.frequency.linearRampToValueAtTime(finalModRate, audioCtx.currentTime + 0.02);
   document.getElementById("modRateValue").textContent = finalModRate.toFixed(1) + " Hz (Tilt: " + beta.toFixed(1) + "°)";
+  
+  if (lockPosition) {
+    navigator.geolocation.getCurrentPosition(pos => {
+      const distance = calculateDistance(pos.coords, lockPosition);
+      const bearing = calculateBearing(pos.coords, lockPosition);
+      updateCompassDisplay(distance, bearing);
+    });
+  }
 }
 
 async function requestOrientationPermission() {
@@ -306,6 +348,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const modRateInput = document.getElementById("modRate");
   const waveformSelect = document.getElementById("waveform");
 
+  compassSection = document.getElementById("compass-section");
+  compassSvg = document.getElementById("compass");
+  directionArrow = document.getElementById("direction-arrow");
+  distanceDisplay = document.getElementById("distance-display");
+
   if (!lockBtn || !testBtn || !toggleDirectionBtn || !orientationBtn || !motionBtn || !cameraBtn || !baseFreqInput || !modRangeInput || !modRateInput || !waveformSelect) {
     log("One or more UI elements not found. Check HTML IDs.");
     console.error("Missing elements:", { lockBtn, testBtn, toggleDirectionBtn, orientationBtn, motionBtn, cameraBtn, baseFreqInput, modRangeInput, modRateInput, waveformSelect });
@@ -319,6 +366,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const audioSuccess = await initAudio();
     if (!audioSuccess) return;
     await startGpsTracking();
+    compassSection.style.display = "block";
   });
 
   testBtn.addEventListener("click", async () => {
