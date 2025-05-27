@@ -1,223 +1,198 @@
 // fm-synth.js
 
-// Global synth variables
 let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-let carrierOsc, modOsc, modGain, gainNode;
+let baseFreqInput = document.getElementById('baseFreq');
+let modRangeInput = document.getElementById('modRange');
+let modRateInput = document.getElementById('modRate');
+let waveformSelect = document.getElementById('waveform');
+
+let oscillator, modulator, modGain;
 let isPlaying = false;
 
-// UI elements
-const baseFreqSlider = document.getElementById("baseFreq");
-const modRangeSlider = document.getElementById("modRange");
-const modRateSlider = document.getElementById("modRate");
-const waveformSelect = document.getElementById("waveform");
-const statusDiv = document.getElementById("status");
-
-// Current frequency (Hz)
-let currentFrequency = parseFloat(baseFreqSlider.value);
-
-// --- MIDI Setup ---
 let midiAccess = null;
 let midiOutput = null;
+let lockedPosition = null;
+const statusDiv = document.getElementById('status');
+const lockBtn = document.getElementById('lockBtn');
 
-navigator.requestMIDIAccess()
-  .then(onMIDISuccess)
-  .catch(onMIDIFailure);
-
-function onMIDISuccess(midi) {
-  midiAccess = midi;
-  const outputs = Array.from(midiAccess.outputs.values());
-  if (outputs.length > 0) {
-    midiOutput = outputs[0];
-    updateStatus("MIDI ready");
-  } else {
-    updateStatus("No MIDI outputs found");
+lockBtn.addEventListener('click', () => {
+  if (!navigator.geolocation) {
+    statusDiv.textContent = "Geolocation not supported by your browser.";
+    statusDiv.className = "status error";
+    return;
   }
+  statusDiv.textContent = "Locking GPS position...";
+  statusDiv.className = "status";
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      lockedPosition = {
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+      };
+      statusDiv.textContent = `GPS Locked: Lat ${lockedPosition.latitude.toFixed(5)}, Lon ${lockedPosition.longitude.toFixed(5)} (±${lockedPosition.accuracy}m)`;
+      statusDiv.className = "status success";
+      console.log("GPS locked:", lockedPosition);
+    },
+    (err) => {
+      statusDiv.textContent = `Error locking GPS: ${err.message}`;
+      statusDiv.className = "status error";
+      console.error("GPS error:", err);
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0,
+    }
+  );
+});
+
+
+function setupMIDI() {
+  if (!navigator.requestMIDIAccess) {
+    console.warn("Web MIDI API not supported in this browser.");
+    return;
+  }
+  navigator.requestMIDIAccess()
+    .then((access) => {
+      midiAccess = access;
+      const outputs = Array.from(midiAccess.outputs.values());
+      console.log("MIDI Outputs:", outputs.map(o => o.name));
+
+      // Try to find a virtual MIDI port automatically; adjust this string as needed
+      midiOutput = outputs.find(o => o.name.includes("IAC") || o.name.includes("loopMIDI"));
+      if (!midiOutput && outputs.length > 0) {
+        // fallback to first output if no virtual port found
+        midiOutput = outputs[0];
+      }
+      if (midiOutput) {
+        console.log("Using MIDI Output:", midiOutput.name);
+      } else {
+        console.warn("No MIDI output found.");
+      }
+    })
+    .catch((err) => {
+      console.error("Failed to get MIDI access", err);
+    });
 }
 
-function onMIDIFailure() {
-  updateStatus("MIDI access failed");
+function sendMIDINoteOn(note, velocity = 127, channel = 0) {
+  if (!midiOutput) return;
+  // 0x90 = note on for channel 1, so add channel offset
+  midiOutput.send([0x90 + channel, note, velocity]);
 }
 
-function sendMIDINote(frequency) {
-  if (!midiOutput || !frequency) return;
-
-  const midiNote = Math.round(69 + 12 * Math.log2(frequency / 440));
-  const velocity = 100;
-
-  midiOutput.send([0x90, midiNote, velocity]); // Note On
-  setTimeout(() => {
-    midiOutput.send([0x80, midiNote, 0]); // Note Off
-  }, 100);
+function sendMIDINoteOff(note, velocity = 0, channel = 0) {
+  if (!midiOutput) return;
+  midiOutput.send([0x80 + channel, note, velocity]);
 }
 
-// --- Status update helper ---
-function updateStatus(message, isError = false) {
-  statusDiv.textContent = `Status: ${message}`;
-  statusDiv.className = isError ? "status error" : "status success";
+function sendMIDIControlChange(controller, value, channel = 0) {
+  if (!midiOutput) return;
+  midiOutput.send([0xB0 + channel, controller, value]);
 }
 
-// --- Audio Synth Setup ---
-function setupSynth() {
-  carrierOsc = audioCtx.createOscillator();
-  modOsc = audioCtx.createOscillator();
+function frequencyToMIDINote(freq) {
+  // MIDI note number = 69 + 12*log2(freq/440)
+  return Math.round(69 + 12 * Math.log2(freq / 440));
+}
+
+function startSynth() {
+  oscillator = audioCtx.createOscillator();
+  modulator = audioCtx.createOscillator();
   modGain = audioCtx.createGain();
-  gainNode = audioCtx.createGain();
 
-  // Modulator chain
-  modOsc.connect(modGain);
-  modGain.connect(carrierOsc.frequency);
+  oscillator.type = waveformSelect.value;
+  oscillator.frequency.value = parseFloat(baseFreqInput.value);
 
-  // Carrier chain
-  carrierOsc.connect(gainNode);
-  gainNode.connect(audioCtx.destination);
+  modulator.frequency.value = parseFloat(modRateInput.value);
+  modGain.gain.value = parseFloat(modRangeInput.value);
 
-  // Initial values
-  carrierOsc.frequency.value = currentFrequency;
-  carrierOsc.type = waveformSelect.value;
+  modulator.connect(modGain);
+  modGain.connect(oscillator.frequency);
+  oscillator.connect(audioCtx.destination);
 
-  modOsc.frequency.value = parseFloat(modRateSlider.value);
-  modGain.gain.value = parseFloat(modRangeSlider.value);
-
-  gainNode.gain.value = 0.3; // Moderate volume
-
-  carrierOsc.start();
-  modOsc.start();
+  oscillator.start();
+  modulator.start();
 
   isPlaying = true;
-  updateStatus("Audio started");
+
+  // Send MIDI Note On based on current frequency
+  let freq = oscillator.frequency.value;
+  let midiNote = frequencyToMIDINote(freq);
+  sendMIDINoteOn(midiNote);
+
+  console.log(`Synth started at freq: ${freq}Hz, MIDI note: ${midiNote}`);
 }
 
 function stopSynth() {
   if (!isPlaying) return;
-  carrierOsc.stop();
-  modOsc.stop();
+
+  let freq = oscillator.frequency.value;
+  let midiNote = frequencyToMIDINote(freq);
+  sendMIDINoteOff(midiNote);
+
+  oscillator.stop();
+  modulator.stop();
+
+  oscillator.disconnect();
+  modulator.disconnect();
+  modGain.disconnect();
+
   isPlaying = false;
-  updateStatus("Audio stopped");
+
+  console.log(`Synth stopped, MIDI note off sent for note: ${midiNote}`);
 }
 
-// --- Frequency update with MIDI send ---
-function updateFrequency(newFreq) {
-  if (!isPlaying) setupSynth();
+function updateSynth() {
+  if (!isPlaying) return;
 
-  currentFrequency = newFreq;
-  carrierOsc.frequency.setValueAtTime(currentFrequency, audioCtx.currentTime);
+  oscillator.type = waveformSelect.value;
+  oscillator.frequency.value = parseFloat(baseFreqInput.value);
+  modulator.frequency.value = parseFloat(modRateInput.value);
+  modGain.gain.value = parseFloat(modRangeInput.value);
 
-  sendMIDINote(currentFrequency);
-  updateStatus(`Frequency: ${currentFrequency.toFixed(2)} Hz`);
+  // Send updated MIDI note if frequency changed
+  let freq = oscillator.frequency.value;
+  let midiNote = frequencyToMIDINote(freq);
+
+  // For simplicity, send Note On for new note, Note Off for old note could be managed if tracking notes
+  // Here we just send a CC message with frequency info for continuous control
+  sendMIDIControlChange(74, Math.min(127, Math.floor(freq / 10))); // CC74 = Brightness, as an example
+
+  console.log(`Synth updated freq: ${freq}Hz, MIDI note approx: ${midiNote}`);
 }
 
-// --- UI event listeners ---
-
-baseFreqSlider.addEventListener("input", () => {
-  const freq = parseFloat(baseFreqSlider.value);
-  updateFrequency(freq);
-  document.getElementById("baseFreqValue").textContent = `${freq} Hz`;
-});
-
-modRangeSlider.addEventListener("input", () => {
-  const modRange = parseFloat(modRangeSlider.value);
-  modGain.gain.setValueAtTime(modRange, audioCtx.currentTime);
-  document.getElementById("modRangeValue").textContent = `${modRange} Hz`;
-});
-
-modRateSlider.addEventListener("input", () => {
-  const modRate = parseFloat(modRateSlider.value);
-  modOsc.frequency.setValueAtTime(modRate, audioCtx.currentTime);
-  document.getElementById("modRateValue").textContent = `${modRate} Hz`;
-});
-
-waveformSelect.addEventListener("change", () => {
-  carrierOsc.type = waveformSelect.value;
-});
-
-// Button to test audio start/stop
-document.getElementById("testBtn").addEventListener("click", () => {
+// UI event listeners
+document.getElementById('testBtn').addEventListener('click', () => {
   if (isPlaying) {
     stopSynth();
   } else {
-    setupSynth();
+    startSynth();
   }
 });
 
-// Initialize UI values on load
-window.addEventListener("load", () => {
-  document.getElementById("baseFreqValue").textContent = `${baseFreqSlider.value} Hz`;
-  document.getElementById("modRangeValue").textContent = `${modRangeSlider.value} Hz`;
-  document.getElementById("modRateValue").textContent = `${modRateSlider.value} Hz`;
-  updateStatus("Ready");
+baseFreqInput.addEventListener('input', () => {
+  document.getElementById('baseFreqValue').textContent = baseFreqInput.value + " Hz";
+  updateSynth();
 });
 
-// Export updateFrequency for external use (e.g., GPS updates)
-window.updateFrequency = updateFrequency;
-
-// GPS Lock logic
-let lockedPosition = null;
-
-const lockBtn = document.getElementById("lockBtn");
-const distanceDisplay = document.getElementById("distance-display");
-const compassSection = document.getElementById("compass-section");
-const compassArrow = document.getElementById("direction-arrow");
-
-lockBtn.addEventListener("click", () => {
-  if (!navigator.geolocation) {
-    alert("Geolocation not supported by your browser.");
-    return;
-  }
-
-  navigator.geolocation.getCurrentPosition(
-    (position) => {
-      lockedPosition = position.coords;
-      updateStatus("GPS Locked");
-      compassSection.classList.remove("hidden");
-      updateDistanceAndDirection();
-    },
-    (err) => {
-      updateStatus("Error locking GPS: " + err.message, true);
-    }
-  );
+modRangeInput.addEventListener('input', () => {
+  document.getElementById('modRangeValue').textContent = modRangeInput.value + " Hz";
+  updateSynth();
 });
 
-// Function to update distance and direction from locked position
-function updateDistanceAndDirection() {
-  if (!lockedPosition) return;
+modRateInput.addEventListener('input', () => {
+  document.getElementById('modRateValue').textContent = modRateInput.value + " Hz";
+  updateSynth();
+});
 
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const current = pos.coords;
+waveformSelect.addEventListener('change', () => {
+  updateSynth();
+});
 
-      // Calculate distance in meters using Haversine formula
-      const R = 6371000; // Earth radius in meters
-      const lat1 = lockedPosition.latitude * (Math.PI / 180);
-      const lat2 = current.latitude * (Math.PI / 180);
-      const deltaLat = (current.latitude - lockedPosition.latitude) * (Math.PI / 180);
-      const deltaLon = (current.longitude - lockedPosition.longitude) * (Math.PI / 180);
-
-      const a = Math.sin(deltaLat/2) * Math.sin(deltaLat/2) +
-                Math.cos(lat1) * Math.cos(lat2) *
-                Math.sin(deltaLon/2) * Math.sin(deltaLon/2);
-
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      const distance = R * c;
-
-      distanceDisplay.textContent = `${distance.toFixed(1)} m`;
-
-      // Calculate bearing (direction)
-      const y = Math.sin(deltaLon) * Math.cos(lat2);
-      const x = Math.cos(lat1) * Math.sin(lat2) -
-                Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLon);
-
-      let bearing = Math.atan2(y, x);
-      bearing = bearing * (180 / Math.PI); // Convert to degrees
-      bearing = (bearing + 360) % 360; // Normalize
-
-      // Rotate compass arrow
-      compassArrow.setAttribute("transform", `rotate(${bearing}, 100, 100)`);
-
-      // Repeat update every second while locked
-      setTimeout(updateDistanceAndDirection, 1000);
-    },
-    (err) => {
-      updateStatus("Error getting current position: " + err.message, true);
-    }
-  );
-}
+// Initialize MIDI on load
+window.addEventListener('load', () => {
+  setupMIDI();
+});
