@@ -1,0 +1,84 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+}
+
+header {
+    font-size: 24px;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+section {
+    margin-bottom: 20px;
+}
+
+.control {
+    display: flex;
+    align-items: center;
+    margin: 10px 0;
+}
+
+.control label {
+    margin-right: 10px;
+}
+
+.control input[type="range"], .control select {
+    margin: 0 10px;
+}
+
+#status {
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid #ccc;
+}
+
+.status.success {
+    color: green;
+}
+
+.status.error {
+    color: red;
+}
+
+#compass-section {
+    display: none;
+    text-align: center;
+}
+
+#compass {
+    margin: 10px auto;
+    width: 200px;
+    height: 200px;
+}
+
+#video-container {
+    display: none;
+    margin: 10px auto;
+}
+
+#video {
+    width: 100%;
+    max-width: 300px;
+}
+
+.orientation-control {
+    transform: scale(0.8);
+}
+
+.orientation-control button {
+    padding: 5px 10px;
+    font-size: 14px;
+}
+
+.orientation-control input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+}
+
+#description {
+    font-size: 16px;
+    text-align: center;
+    margin-bottom: 20px;
+    color: #333;
+}

@@ -1,319 +1,87 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GPS FM Synthesizer</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background-color: #f5f5f5;
-      color: #333;
-      margin: 0;
-      padding: 20px;
-      max-width: 500px;
-      margin-left: auto;
-      margin-right: auto;
-      line-height: 1.6;
-    }
-    header {
-      text-align: center;
-      margin-bottom: 30px;
-    }
-    h1 {
-      font-size: 2rem;
-      color: #2c5282;
-      margin: 0;
-    }
-    h2 {
-      font-size: 1.5rem;
-      color: #4a5568;
-      margin-bottom: 15px;
-    }
-    section {
-      background-color: #fff;
-      border: 2px solid #e2e8f0;
-      border-radius: 8px;
-      padding: 20px;
-      margin-bottom: 20px;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    }
-    .status {
-      background-color: #edf2f7;
-      padding: 10px;
-      border-radius: 6px;
-      text-align: center;
-      margin-bottom: 20px;
-      font-weight: bold;
-      color: #2d3748;
-    }
-    .status.success {
-      background-color: #c6f6d5;
-      color: #22543d;
-    }
-    .status.error {
-      background-color: #fed7d7;
-      color: #742a2a;
-    }
-    button {
-      display: block;
-      width: 100%;
-      padding: 12px;
-      margin-bottom: 10px;
-      background-color: #4299e1;
-      color: #fff;
-      border: none;
-      border-radius: 6px;
-      font-size: 1rem;
-      cursor: pointer;
-      transition: background-color 0.2s;
-    }
-    button:hover {
-      background-color: #3182ce;
-    }
-    button:focus {
-      outline: 3px solid #90cdf4;
-      outline-offset: 2px;
-    }
-    .toggle-container {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 10px;
-    }
-    .toggle-label {
-      font-size: 1rem;
-      color: #4a5568;
-    }
-    .toggle {
-      position: relative;
-      width: 50px;
-      height: 26px;
-    }
-    .toggle input {
-      opacity: 0;
-      width: 0;
-      height: 0;
-    }
-    .toggle .slider {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background-color: #cbd5e0;
-      border-radius: 13px;
-      transition: background-color 0.2s;
-      cursor: pointer;
-    }
-    .toggle input:checked + .slider {
-      background-color: #4299e1;
-    }
-    .toggle .slider:before {
-      position: absolute;
-      content: '';
-      height: 20px;
-      width: 20px;
-      left: 3px;
-      bottom: 3px;
-      background-color: #fff;
-      border-radius: 50%;
-      transition: transform 0.2s;
-    }
-    .toggle input:checked + .slider:before {
-      transform: translateX(24px);
-    }
-    .slider-container {
-      margin-bottom: 20px;
-    }
-    .slider-label {
-      display: block;
-      font-size: 1rem;
-      color: #4a5568;
-      margin-bottom: 8px;
-    }
-    input[type="range"] {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 100%;
-      height: 12px;
-      background: #e2e8f0;
-      border-radius: 6px;
-      outline: none;
-      position: relative;
-      z-index: 10;
-      pointer-events: auto;
-      touch-action: pan-y;
-      margin: 10px 0;
-    }
-    input[type="range"]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 24px;
-      height: 24px;
-      background: #4299e1;
-      border-radius: 50%;
-      cursor: pointer;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-      pointer-events: auto;
-    }
-    input[type="range"]::-moz-range-thumb {
-      width: 24px;
-      height: 24px;
-      background: #4299e1;
-      border-radius: 50%;
-      cursor: pointer;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-      pointer-events: auto;
-    }
-    input[type="range"]:focus {
-      outline: 3px solid #90cdf4;
-      outline-offset: 2px;
-    }
-    .slider-value {
-      display: block;
-      font-size: 0.9rem;
-      color: #718096;
-      margin-top: 5px;
-    }
-    select {
-      width: 100%;
-      padding: 12px;
-      background-color: #edf2f7;
-      border: 2px solid #e2e8f0;
-      border-radius: 6px;
-      font-size: 1rem;
-      color: #2d3748;
-      margin-bottom: 10px;
-      cursor: pointer;
-    }
-    select:focus {
-      outline: 3px solid #90cdf4;
-      outline-offset: 2px;
-    }
-    video {
-      display: none;
-    }
-    #compass-section {
-      text-align: center;
-    }
-    #compass {
-      transition: transform 0.3s ease;
-      margin: 0 auto;
-    }
-    #direction-arrow {
-      marker-end: url(#arrowhead);
-    }
-    #distance-display {
-      font-weight: bold;
-      font-size: 1.2rem;
-    }
-      .orientation-control {
-    transform: scale(0.8); /* Reduce size by 20% */
-}
-
-.orientation-control button {
-    padding: 5px 10px; /* Smaller padding */
-    font-size: 14px; /* Smaller font */
-}
-
-.orientation-control input[type="checkbox"] {
-    width: 16px;
-    height: 16px;
-}
-
-#description {
-    font-size: 16px;
-    text-align: center;
-    margin-bottom: 20px;
-    color: #333;
-}
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPSSynthesizer</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
 </head>
 <body>
-  <header>
-    <h1>tokeno apps: GPSynthesizer</h1><br>
-   A web-based audio app that generates dynamic FM synthesis sounds modulated by real-world inputs.
-  </header>
- 
+    <p id="description">A web-based audio application that generates dynamic FM synthesis sounds modulated by real-world inputs</p>
+    <header>tOkenoApps</header>
+    <div id="status">Status: Ready</div>
 
-  <div id="status" class="status" role="status" aria-live="polite">Status: Ready</div>
+    <section>
+        <h2>Sensor Controls</h2>
+        <button id="testBtn">Test Audio</button>
+        <button id="lockBtn">Lock GPS</button>
+        <button id="toggleDirectionBtn">Invert Frequency</button>
+        <div class="control orientation-control">
+            <button id="orientationBtn">Orientation</button>
+            <input type="checkbox" id="orientationToggle" aria-label="Toggle Orientation">
+            <label for="orientationToggle"></label>
+        </div>
+        <div class="control">
+            <button id="motionBtn">Accelerometer</button>
+            <input type="checkbox" id="motionToggle" aria-label="Toggle Accelerometer">
+            <label for="motionToggle"></label>
+        </div>
+        <div class="control">
+            <button id="cameraBtn">Camera</button>
+            <input type="checkbox" id="cameraToggle" aria-label="Toggle Camera">
+            <label for="cameraToggle"></label>
+        </div>
+        <div class="control">
+            <label for="maxDistance">Max Distance</label>
+            <select id="maxDistance">
+                <option value="10">10m</option>
+                <option value="50" selected>50m</option>
+                <option value="100">100m</option>
+            </select>
+        </div>
+    </section>
 
-  <section>
-    <h2>Sensor Controls</h2>
-    <button id="testBtn" aria-label="Test audio output">Test Audio</button>
-    <button id="lockBtn" aria-label="Lock GPS position">Lock GPS</button>
-    <button id="toggleDirectionBtn" aria-label="Invert frequency mapping">Invert Frequency</button>
-    <div class="toggle-container">
-      <span class="toggle-label">Orientation</span>
-      <label class="toggle">
-        <input type="checkbox" id="orientationBtn" aria-label="Toggle device orientation">
-        <span class="slider"></span>
-      </label>
-    </div>
-    <div class="toggle-container">
-      <span class="toggle-label">Accelerometer</span>
-      <label class="toggle">
-        <input type="checkbox" id="motionBtn" aria-label="Toggle accelerometer">
-        <span class="slider"></span>
-      </label>
-    </div>
-    <div class="toggle-container">
-      <span class="toggle-label">Camera</span>
-      <label class="toggle">
-        <input type="checkbox" id="cameraBtn" aria-label="Toggle camera">
-        <span class="slider"></span>
-      </label>
-    </div>
-  </section>
+    <section>
+        <h2>Audio Settings</h2>
+        <div class="control">
+            <label for="baseFreq">Base Frequency (Hz)</label>
+            <input type="range" id="baseFreq" min="100" max="1000" value="440" aria-valuenow="440">
+            <span id="baseFreqValue">440 Hz</span>
+        </div>
+        <div class="control">
+            <label for="modRange">Modulation Range (Hz)</label>
+            <input type="range" id="modRange" min="0" max="500" value="200" aria-valuenow="200">
+            <span id="modRangeValue">200 Hz</span>
+        </div>
+        <div class="control">
+            <label for="modRate">Modulator Rate (Hz)</label>
+            <input type="range" id="modRate" min="0.1" max="50" step="0.1" value="4" aria-valuenow="4">
+            <span id="modRateValue">4 Hz</span>
+        </div>
+        <div class="control">
+            <label for="waveform">Waveform</label>
+            <select id="waveform">
+                <option value="sine" selected>Sine</option>
+                <option value="square">Square</option>
+                <option value="triangle">Triangle</option>
+                <option value="sawtooth">Sawtooth</option>
+            </select>
+        </div>
+    </section>
 
-  <section>
-    <h2>Audio Settings</h2>
-    <div class="slider-container">
-      <label for="baseFreq" class="slider-label">Base Frequency (Hz)</label>
-      <input type="range" id="baseFreq" min="100" max="1000" step="1" value="440" tabindex="0" aria-label="Adjust base frequency" aria-valuemin="100" aria-valuemax="1000" aria-valuenow="440">
-      <span id="baseFreqValue" class="slider-value" aria-live="polite">440 Hz</span>
-    </div>
-    <div class="slider-container">
-      <label for="modRange" class="slider-label">Modulation Range (Hz)</label>
-      <input type="range" id="modRange" min="0" max="500" step="1" value="200" tabindex="0" aria-label="Adjust modulation range" aria-valuemin="0" aria-valuemax="500" aria-valuenow="200">
-      <span id="modRangeValue" class="slider-value" aria-live="polite">200 Hz</span>
-    </div>
-    <div class="slider-container">
-      <label for="modRate" class="slider-label">Modulator Rate (Hz)</label>
-      <input type="range" id="modRate" min="0.1" max="50" step="0.1" value="4" tabindex="0" aria-label="Adjust modulator rate" aria-valuemin="0.1" aria-valuemax="50" aria-valuenow="10">
-      <span id="modRateValue" class="slider-value" aria-live="polite">4 Hz</span>
-    </div>
-    <div>
-      <label for="waveform" class="slider-label">Waveform</label>
-      <select id="waveform" aria-label="Select waveform">
-        <option value="sine" selected>Sine</option>
-        <option value="square">Square</option>
-        <option value="triangle">Triangle</option>
-        <option value="sawtooth">Sawtooth</option>
-      </select>
-    </div>
-  </section>
+    <section id="compass-section">
+        <h2>Navigation</h2>
+        <div id="video-container">
+            <video id="video" autoplay muted playsinline></video>
+        </div>
+        <svg id="compass" viewBox="0 0 200 200">
+            <circle cx="100" cy="100" r="90" stroke="black" stroke-width="2" fill="none"/>
+            <path id="direction-arrow" d="M100,10 L85,40 L115,40 Z" fill="red"/>
+        </svg>
+        <div id="distance-display">0m</div>
+    </section>
 
-  <section id="compass-section" style="display: none;">
-    <h2>Navigation</h2>
-    <div style="text-align: center; margin: 20px 0;">
-      <svg id="compass" width="200" height="200" viewBox="0 0 200 200">
-        <circle cx="100" cy="100" r="90" fill="none" stroke="#4299e1" stroke-width="2"/>
-        <circle cx="100" cy="100" r="80" fill="#edf2f7"/>
-        <line id="direction-arrow" x1="100" y1="100" x2="100" y2="30" stroke="#e53e3e" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="100" cy="100" r="10" fill="#e53e3e"/>
-        <text x="100" y="60" text-anchor="middle" fill="#2d3748" font-size="14" id="distance-display">0m</text>
-      </svg>
-    </div>
-      
-    <a href="https://www.tokeno.net">tokeno.net</a> <br>
-          <a href="https://github.com/tokenno/FM_GPS">Github Lin</a>
-      
-  </section>
-
-  <video id="video" autoplay></video>
-
-  <script src="fm-synth.js"></script>
+    <script src="fm-synth.js"></script>
 </body>
 </html>
