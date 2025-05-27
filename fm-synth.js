@@ -3,6 +3,7 @@ let carrierOsc, modulatorOsc, modGain;
 let lockPosition = null;
 let reverseMapping = false;
 let watchId = null;
+let orientationActive = false;
 
 let baseFreq = 440;
 let freqRange = 200;
@@ -150,18 +151,62 @@ function calculateDistance(coords1, coords2) {
   return R * c;
 }
 
+function handleOrientation(event) {
+  if (!orientationActive || !modulatorOsc) return;
+
+  const beta = event.beta; // Front-to-back tilt in degrees (-180 to 180)
+  if (beta === null) {
+    log("Orientation data unavailable");
+    return;
+  }
+
+  // Map beta (-180 to 180) to a small modulation range (±5 Hz around modRate)
+  const maxModRateChange = 5;
+  const modRateOffset = (beta / 180) * maxModRateChange;
+  const adjustedModRate = modRate + modRateOffset;
+
+  // Ensure adjustedModRate stays within reasonable bounds
+  const finalModRate = Math.max(0.1, Math.min(50, adjustedModRate));
+  modulatorOsc.frequency.setValueAtTime(finalModRate, audioCtx.currentTime);
+  document.getElementById("modRateValue").textContent = `${finalModRate.toFixed(1)} Hz (Tilt: ${beta.toFixed(1)}°)`;
+}
+
+async function requestOrientationPermission() {
+  if (typeof DeviceOrientationEvent.requestPermission === "function") {
+    // iOS 13+ requires permission
+    try {
+      const permission = await DeviceOrientationEvent.requestPermission();
+      if (permission === "granted") {
+        orientationActive = true;
+        window.addEventListener("deviceorientation", handleOrientation);
+        log("Orientation access granted. Tilt device to adjust modulator frequency.");
+      } else {
+        log("Orientation permission denied.");
+      }
+    } catch (err) {
+      log(`Orientation error: ${err.message}`);
+    }
+  } else {
+    // Non-iOS or older browsers
+    orientationActive = true;
+    window.addEventListener("deviceorientation", handleOrientation);
+    log("Orientation enabled. Tilt device to adjust modulator frequency.");
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const lockBtn = document.getElementById("lockBtn");
   const testBtn = document.getElementById("testBtn");
   const toggleDirectionBtn = document.getElementById("toggleDirectionBtn");
+  const orientationBtn = document.getElementById("orientationBtn");
   const baseFreqInput = document.getElementById("baseFreq");
   const modRangeInput = document.getElementById("modRange");
   const modRateInput = document.getElementById("modRate");
   const waveformSelect = document.getElementById("waveform");
 
-  if (!lockBtn || !testBtn || !toggleDirectionBtn || !baseFreqInput || !modRangeInput || !modRateInput || !waveformSelect) {
+  if (!lockBtn || !testBtn || !toggleDirectionBtn || !orientationBtn || !baseFreqInput || !modRangeInput || !modRateInput || !waveformSelect) {
     log("One or more UI elements not found. Check HTML IDs.");
-    console.error("Missing elements:", { lockBtn, testBtn, toggleDirectionBtn, baseFreqInput, modRangeInput, modRateInput, waveformSelect });
+    console.error("Missing elements:", { lockBtn, testBtn, toggleDirectionBtn, orientationBtn, baseFreqInput, modRangeInput, modRateInput, waveformSelect });
     return;
   }
 
@@ -182,6 +227,11 @@ document.addEventListener("DOMContentLoaded", () => {
   toggleDirectionBtn.addEventListener("click", () => {
     reverseMapping = !reverseMapping;
     log(`Frequency mapping ${reverseMapping ? "reversed" : "normal"}`);
+  });
+
+  orientationBtn.addEventListener("click", () => {
+    console.log("Enable Orientation button clicked");
+    requestOrientationPermission();
   });
 
   baseFreqInput.addEventListener("input", (e) => {
