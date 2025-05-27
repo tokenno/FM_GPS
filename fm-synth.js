@@ -13,7 +13,7 @@ const statusEl = document.getElementById("status");
 
 function log(msg) {
   console.log(msg);
-  if (statusEl) statusEl.textContent = msg;
+  if (statusEl) statusEl.textContent = `Status: ${msg}`;
 }
 
 async function initAudio() {
@@ -22,16 +22,14 @@ async function initAudio() {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
     
-    // Resume context if suspended
     if (audioCtx.state === 'suspended') {
       await audioCtx.resume();
+      log("Audio context resumed");
     }
 
-    // Clean up previous nodes if they exist
     if (carrierOsc) carrierOsc.stop();
     if (modulatorOsc) modulatorOsc.stop();
 
-    // Create new nodes
     carrierOsc = audioCtx.createOscillator();
     carrierOsc.type = waveform;
     carrierOsc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
@@ -43,14 +41,10 @@ async function initAudio() {
     modGain = audioCtx.createGain();
     modGain.gain.setValueAtTime(freqRange, audioCtx.currentTime);
 
-    // Connect modulation
     modulatorOsc.connect(modGain);
-    modGain.connect(carrierOsc.frequency); // Modulate frequency directly
-
-    // Output
+    modGain.connect(carrierOsc.frequency);
     carrierOsc.connect(audioCtx.destination);
 
-    // Start oscillators
     carrierOsc.start();
     modulatorOsc.start();
 
@@ -63,98 +57,153 @@ async function initAudio() {
 }
 
 function updateModulation(distance) {
-  if (!carrierOsc || !modGain) return;
+  if (!carrierOsc || !modGain) {
+    log("Audio nodes not initialized");
+    return;
+  }
   
-  // Simple log mapping
   const mapped = Math.min(Math.max(Math.log10(distance + 1) * 100, 0), 100);
   const modDepthHz = reverseMapping 
     ? ((100 - mapped) / 100) * freqRange 
     : (mapped / 100) * freqRange;
 
-  // Update modulation in real-time
   const now = audioCtx.currentTime;
   modGain.gain.setValueAtTime(modDepthHz, now);
   carrierOsc.frequency.setValueAtTime(baseFreq, now);
+  log(`Modulation updated: ${modDepthHz.toFixed(2)} Hz, Distance: ${distance.toFixed(2)} meters`);
 }
 
-// GPS Functions
 async function startGpsTracking() {
   if (!navigator.geolocation) {
-    log("Geolocation not supported");
+    log("Geolocation not supported by this browser or device.");
     return;
+  }
+
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    log("Cleared previous GPS watch");
   }
 
   try {
     const position = await new Promise((resolve, reject) => {
       navigator.geolocation.getCurrentPosition(resolve, reject, {
         enableHighAccuracy: true,
-        timeout: 5000
+        timeout: 10000,
+        maximumAge: 0,
       });
     });
-
     lockPosition = position.coords;
-    log("GPS position locked");
+    log(`GPS position locked: Lat ${lockPosition.latitude.toFixed(4)}, Lon ${lockPosition.longitude.toFixed(4)}`);
 
     watchId = navigator.geolocation.watchPosition(
       pos => {
+        if (!lockPosition) {
+          log("Lock position not set");
+          return;
+        }
         const distance = calculateDistance(pos.coords, lockPosition);
         updateModulation(distance);
       },
-      err => log(`GPS error: ${err.message}`),
-      { enableHighAccuracy: true }
+      err => {
+        if (err.code === 1) {
+          log("GPS permission denied. Please allow location access.");
+        } else if (err.code === 2) {
+          log("GPS unavailable. Check your device's location services.");
+        } else if (err.code === 3) {
+          log("GPS request timed out. Try again in an open area.");
+        } else {
+          log(`GPS watch error: ${err.message}`);
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   } catch (err) {
-    log(`GPS error: ${err.message}`);
+    if (err.code === 1) {
+      log("GPS permission denied. Please allow location access.");
+    } else if (err.code === 2) {
+      log("GPS unavailable. Check your device's location services.");
+    } else if (err.code === 3) {
+      log("GPS request timed out. Try again in an open area.");
+    } else {
+      log(`GPS error: ${err.message}`);
+    }
   }
 }
 
 function calculateDistance(coords1, coords2) {
-  const R = 6371e3; // Earth radius in meters
-  const φ1 = coords1.latitude * Math.PI/180;
-  const φ2 = coords2.latitude * Math.PI/180;
-  const Δφ = (coords2.latitude-coords1.latitude) * Math.PI/180;
-  const Δλ = (coords2.longitude-coords1.longitude) * Math.PI/180;
+  if (!coords1 || !coords2 || !coords1.latitude || !coords2.latitude) {
+    log("Invalid coordinates for distance calculation");
+    return 0;
+  }
+  const R = 6371e3;
+  const φ1 = coords1.latitude * Math.PI / 180;
+  const φ2 = coords2.latitude * Math.PI / 180;
+  const Δφ = (coords2.latitude - coords1.latitude) * Math.PI / 180;
+  const Δλ = (coords2.longitude - coords1.longitude) * Math.PI / 180;
 
-  const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
             Math.cos(φ1) * Math.cos(φ2) *
-            Math.sin(Δλ/2) * Math.sin(Δλ/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
   return R * c;
 }
 
-// UI Event Listeners
-document.getElementById("testBtn").addEventListener("click", async () => {
-  await initAudio();
-  updateModulation(10); // Test with moderate modulation
-});
+document.addEventListener("DOMContentLoaded", () => {
+  const lockBtn = document.getElementById("lockBtn");
+  const testBtn = document.getElementById("testBtn");
+  const toggleDirectionBtn = document.getElementById("toggleDirectionBtn");
+  const baseFreqInput = document.getElementById("baseFreq");
+  const modRangeInput = document.getElementById("modRange");
+  const modRateInput = document.getElementById("modRate");
+  const waveformSelect = document.getElementById("waveform");
 
-document.getElementById("lockBtn").addEventListener("click", async () => {
-  await initAudio();
-  await startGpsTracking();
-});
+  if (!lockBtn || !testBtn || !toggleDirectionBtn || !baseFreqInput || !modRangeInput || !modRateInput || !waveformSelect) {
+    log("One or more UI elements not found. Check HTML IDs.");
+    console.error("Missing elements:", { lockBtn, testBtn, toggleDirectionBtn, baseFreqInput, modRangeInput, modRateInput, waveformSelect });
+    return;
+  }
 
-document.getElementById("toggleDirectionBtn").addEventListener("click", () => {
-  reverseMapping = !reverseMapping;
-  log(`Mapping ${reverseMapping ? "reversed" : "normal"}`);
-});
+  lockBtn.addEventListener("click", async () => {
+    console.log("Lock GPS button clicked");
+    log("Initializing audio and GPS...");
+    const audioSuccess = await initAudio();
+    if (!audioSuccess) return;
+    await startGpsTracking();
+  });
 
-// Parameter Controls
-document.getElementById("baseFreq").addEventListener("input", (e) => {
-  baseFreq = parseFloat(e.target.value);
-  if (carrierOsc) carrierOsc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
-});
+  testBtn.addEventListener("click", async () => {
+    console.log("Test Audio button clicked");
+    const audioSuccess = await initAudio();
+    if (audioSuccess) updateModulation(10);
+  });
 
-document.getElementById("modRange").addEventListener("input", (e) => {
-  freqRange = parseFloat(e.target.value);
-});
+  toggleDirectionBtn.addEventListener("click", () => {
+    reverseMapping = !reverseMapping;
+    log(`Frequency mapping ${reverseMapping ? "reversed" : "normal"}`);
+  });
 
-document.getElementById("modRate").addEventListener("input", (e) => {
-  modRate = parseFloat(e.target.value);
-  if (modulatorOsc) modulatorOsc.frequency.setValueAtTime(modRate, audioCtx.currentTime);
-});
+  baseFreqInput.addEventListener("input", (e) => {
+    baseFreq = parseFloat(e.target.value);
+    document.getElementById("baseFreqValue").textContent = `${baseFreq} Hz`;
+    if (carrierOsc) carrierOsc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
+  });
 
-document.getElementById("waveform").addEventListener("change", (e) => {
-  waveform = e.target.value;
-  if (carrierOsc) carrierOsc.type = waveform;
+  modRangeInput.addEventListener("input", (e) => {
+    freqRange = parseFloat(e.target.value);
+    document.getElementById("modRangeValue").textContent = `${freqRange} Hz`;
+  });
+
+  modRateInput.addEventListener("input", (e) => {
+    modRate = parseFloat(e.target.value);
+    document.getElementById("modRateValue").textContent = `${modRate} Hz`;
+    if (modulatorOsc) modulatorOsc.frequency.setValueAtTime(modRate, audioCtx.currentTime);
+  });
+
+  waveformSelect.addEventListener("change", (e) => {
+    waveform = e.target.value;
+    if (carrierOsc) carrierOsc.type = waveform;
+    log(`Waveform changed to ${waveform}`);
+  });
 });

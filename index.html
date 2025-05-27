@@ -1,45 +1,75 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GPS FM Synth</title>
   <style>
-    body { font-family: sans-serif; padding: 1em; }
-    label, button { display: block; margin-top: 1em; }
-    .status { margin-top: 1em; }
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 20px auto;
+      padding: 10px;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      cursor: pointer;
+      pointer-events: auto;
+      opacity: 1;
+      border: 1px solid #333;
+      border-radius: 4px;
+    }
+    button:hover {
+      background-color: #f0f0f0;
+    }
+    label, select, input {
+      margin: 10px 0;
+      display: block;
+    }
+    input[type="range"] {
+      width: 100%;
+    }
+    #status {
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      min-height: 20px;
+    }
   </style>
 </head>
 <body>
   <h1>GPS FM Synth</h1>
-  
-  <button id="testBtn">Test Audio</button>
-  <button id="lockBtn" disabled>Lock GPS</button>
-  <button id="toggleDirectionBtn">Invert Frequency Mapping</button>
-
-  <label>
-    Base Frequency (Hz)
-    <input type="range" id="baseFreq" min="100" max="2000" value="440">
-  </label>
-  <label>
-    Modulation Range (Hz)
-    <input type="range" id="modRange" min="0" max="1000" value="200">
-  </label>
-  <label>
-    Modulator Rate (Hz)
-    <input type="range" id="modRate" min="1" max="40" value="10">
-  </label>
-  <label>
-    Waveform
+  <div>
+    <button id="testBtn">Test Audio</button>
+    <button id="lockBtn">Lock GPS</button>
+    <button id="toggleDirectionBtn">Invert Frequency Mapping</button>
+  </div>
+  <div>
+    <label for="baseFreq">Base Frequency (Hz)</label>
+    <input type="range" id="baseFreq" min="100" max="1000" step="1" value="440">
+    <span id="baseFreqValue">440 Hz</span>
+  </div>
+  <div>
+    <label for="modRange">Modulation Range (Hz)</label>
+    <input type="range" id="modRange" min="0" max="500" step="1" value="200">
+    <span id="modRangeValue">200 Hz</span>
+  </div>
+  <div>
+    <label for="modRate">Modulator Rate (Hz)</label>
+    <input type="range" id="modRate" min="0.1" max="50" step="0.1" value="10">
+    <span id="modRateValue">10 Hz</span>
+  </div>
+  <div>
+    <label for="waveform">Waveform</label>
     <select id="waveform">
-      <option value="sine">Sine</option>
+      <option value="sine" selected>Sine</option>
       <option value="square">Square</option>
       <option value="triangle">Triangle</option>
       <option value="sawtooth">Sawtooth</option>
     </select>
-  </label>
-
-  <div id="status" class="status"></div>
+  </div>
+  <div id="status">Status: Ready</div>
   <script src="fm-synth.js"></script>
 </body>
 </html>
