@@ -14,6 +14,7 @@ let baseFreq = 440;
 let freqRange = 200;
 let modRate = 4;
 let waveform = 'sine';
+let distanceBand = 50; // Default distance band in meters
 
 const statusEl = document.getElementById("status");
 let compassSection = null;
@@ -85,10 +86,11 @@ function updateModulation(distance) {
     return;
   }
   
-  const mapped = Math.min(Math.max(Math.log10(distance + 1) * 100, 0), 100);
+  // Normalize distance relative to selected distance band
+  const normalizedDistance = Math.min(Math.max(distance / distanceBand, 0), 1);
   const modDepthHz = reverseMapping 
-    ? ((100 - mapped) / 100) * freqRange 
-    : (mapped / 100) * freqRange;
+    ? (1 - normalizedDistance) * freqRange 
+    : normalizedDistance * freqRange;
 
   const now = audioCtx.currentTime;
   modGain.gain.linearRampToValueAtTime(modDepthHz, now + 0.02);
@@ -334,6 +336,7 @@ document.addEventListener("DOMContentLoaded", () => {
     modRangeInput: document.getElementById("modRange"),
     modRateInput: document.getElementById("modRate"),
     waveformSelect: document.getElementById("waveform"),
+    distanceBandSelect: document.getElementById("distanceBand"),
   };
 
   if (Object.values(elements).some(el => !el)) {
@@ -438,5 +441,11 @@ document.addEventListener("DOMContentLoaded", () => {
       carrierOsc.type = waveform;
     }
     log(`Waveform changed to ${waveform}`);
+  });
+
+  elements.distanceBandSelect.addEventListener("change", async (e) => {
+    await audioCtx?.resume();
+    distanceBand = parseFloat(e.target.value);
+    log(`Distance band changed to ${distanceBand} meters`);
   });
 });
