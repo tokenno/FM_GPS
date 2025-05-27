@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>GPS FM Synth</title>
+  <style>
+    body { font-family: sans-serif; padding: 1em; }
+    label, button { display: block; margin-top: 1em; }
+    .status { margin-top: 1em; }
+  </style>
+</head>
+<body>
+  <h1>GPS FM Synth</h1>
+  
+  <button id="testBtn">Test Audio</button>
+  <button id="lockBtn" disabled>Lock GPS</button>
+  <button id="toggleDirectionBtn">Invert Frequency Mapping</button>
+
+  <label>
+    Base Frequency (Hz)
+    <input type="range" id="baseFreq" min="100" max="2000" value="440">
+  </label>
+  <label>
+    Modulation Range (Hz)
+    <input type="range" id="modRange" min="0" max="1000" value="200">
+  </label>
+  <label>
+    Modulator Rate (Hz)
+    <input type="range" id="modRate" min="1" max="40" value="10">
+  </label>
+  <label>
+    Waveform
+    <select id="waveform">
+      <option value="sine">Sine</option>
+      <option value="square">Square</option>
+      <option value="triangle">Triangle</option>
+      <option value="sawtooth">Sawtooth</option>
+    </select>
+  </label>
+
+  <div id="status" class="status"></div>
+  <script src="fm-synth.js"></script>
+</body>
+</html>
