@@ -1,5 +1,7 @@
-let audioCtx;
-let carrierOsc, modulatorOsc, modGain;
+let audioCtx = null;
+let carrierOsc = null;
+let modulatorOsc = null;
+let modGain = null;
 let lockPosition = null;
 let reverseMapping = false;
 let watchId = null;
@@ -19,15 +21,11 @@ let compassSvg = null;
 let directionArrow = null;
 let distanceDisplay = null;
 
-function log(msg) {
+function log(msg, isError = false) {
   console.log(msg);
   if (statusEl) {
-    statusEl.textContent = "Status: " + msg;
-    if (msg.includes("error") || msg.includes("denied") || msg.includes("unavailable")) {
-      statusEl.className = "status error";
-    } else {
-      statusEl.className = "status success";
-    }
+    statusEl.textContent = `Status: ${msg}`;
+    statusEl.className = `status ${isError ? 'error' : 'success'}`;
   }
 }
 
@@ -36,12 +34,12 @@ async function initAudio() {
     if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
-    
     if (audioCtx.state === 'suspended') {
       await audioCtx.resume();
       log("Audio context resumed");
     }
 
+    // Clean up existing oscillators
     if (carrierOsc) {
       carrierOsc.stop();
       carrierOsc.disconnect();
@@ -54,6 +52,7 @@ async function initAudio() {
       modGain.disconnect();
     }
 
+    // Create new audio nodes
     carrierOsc = audioCtx.createOscillator();
     carrierOsc.type = waveform;
     carrierOsc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
@@ -75,14 +74,14 @@ async function initAudio() {
     log("Audio initialized");
     return true;
   } catch (err) {
-    log("Audio error: " + err.message);
+    log("Audio error: " + err.message, true);
     return false;
   }
 }
 
 function updateModulation(distance) {
   if (!carrierOsc || !modGain) {
-    log("Audio nodes not initialized");
+    log("Audio nodes not initialized", true);
     return;
   }
   
@@ -120,7 +119,7 @@ function calculateBearing(coords1, coords2) {
 
 async function startGpsTracking() {
   if (!navigator.geolocation) {
-    log("Geolocation not supported by this browser or device.");
+    log("Geolocation not supported by this browser or device.", true);
     return;
   }
 
@@ -139,12 +138,12 @@ async function startGpsTracking() {
       });
     });
     lockPosition = position.coords;
-    log("GPS position locked: Lat " + lockPosition.latitude.toFixed(4) + ", Lon " + lockPosition.longitude.toFixed(4));
+    log(`GPS position locked: Lat ${lockPosition.latitude.toFixed(4)}, Lon ${lockPosition.longitude.toFixed(4)}`);
 
     watchId = navigator.geolocation.watchPosition(
       pos => {
         if (!lockPosition) {
-          log("Lock position not set");
+          log("Lock position not set", true);
           return;
         }
         const distance = calculateDistance(pos.coords, lockPosition);
@@ -156,34 +155,18 @@ async function startGpsTracking() {
         }
       },
       err => {
-        if (err.code === 1) {
-          log("GPS permission denied. Please allow location access.");
-        } else if (err.code === 2) {
-          log("GPS unavailable. Check your device's location services.");
-        } else if (err.code === 3) {
-          log("GPS request timed out. Try again in an open area.");
-        } else {
-          log("GPS watch error: " + err.message);
-        }
+        log(`GPS error: ${err.message}`, true);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   } catch (err) {
-    if (err.code === 1) {
-      log("GPS permission denied. Please allow location access.");
-    } else if (err.code === 2) {
-      log("GPS unavailable. Check your device's location services.");
-    } else if (err.code === 3) {
-      log("GPS request timed out. Try again in an open area.");
-    } else {
-      log("GPS error: " + err.message);
-    }
+    log(`GPS error: ${err.message}`, true);
   }
 }
 
 function calculateDistance(coords1, coords2) {
   if (!coords1 || !coords2 || !coords1.latitude || !coords2.latitude) {
-    log("Invalid coordinates for distance calculation");
+    log("Invalid coordinates for distance calculation", true);
     return 0;
   }
   const R = 6371e3;
@@ -204,11 +187,10 @@ function handleOrientation(event) {
   if (!orientationActive || !modulatorOsc) return;
 
   const beta = event.beta;
-  const gamma = event.gamma;
   const alpha = event.alpha;
   
-  if (beta === null || gamma === null || alpha === null) {
-    log("Orientation data unavailable");
+  if (beta === null || alpha === null) {
+    log("Orientation data unavailable", true);
     return;
   }
 
@@ -219,7 +201,7 @@ function handleOrientation(event) {
   const adjustedModRate = modRate + modRateOffset;
   const finalModRate = Math.max(0.1, Math.min(50, adjustedModRate));
   modulatorOsc.frequency.linearRampToValueAtTime(finalModRate, audioCtx.currentTime + 0.02);
-  document.getElementById("modRateValue").textContent = finalModRate.toFixed(1) + " Hz (Tilt: " + beta.toFixed(1) + "°)";
+  document.getElementById("modRateValue").textContent = `${finalModRate.toFixed(1)} Hz (Tilt: ${beta.toFixed(1)}°)`;
   
   if (lockPosition) {
     navigator.geolocation.getCurrentPosition(pos => {
@@ -231,34 +213,34 @@ function handleOrientation(event) {
 }
 
 async function requestOrientationPermission() {
-  if (typeof DeviceOrientationEvent.requestPermission === "function") {
-    try {
-      await audioCtx.resume();
+  try {
+    await audioCtx?.resume();
+    if (typeof DeviceOrientationEvent.requestPermission === "function") {
       const permission = await DeviceOrientationEvent.requestPermission();
       if (permission === "granted") {
         orientationActive = true;
         window.addEventListener("deviceorientation", handleOrientation);
         log("Orientation access granted. Tilt device to adjust modulator frequency.");
       } else {
-        log("Orientation permission denied.");
+        log("Orientation permission denied.", true);
       }
-    } catch (err) {
-      log("Orientation error: " + err.message);
+    } else {
+      orientationActive = true;
+      window.addEventListener("deviceorientation", handleOrientation);
+      log("Orientation enabled. Tilt device to adjust modulator frequency.");
     }
-  } else {
-    await audioCtx.resume();
-    orientationActive = true;
-    window.addEventListener("deviceorientation", handleOrientation);
-    log("Orientation enabled. Tilt device to adjust modulator frequency.");
+  } catch (err) {
+    log("Orientation error: " + err.message, true);
   }
 }
 
 async function initCamera() {
   try {
-    await audioCtx.resume();
+    await audioCtx?.resume();
     const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
     const video = document.getElementById("video");
     video.srcObject = stream;
+    video.classList.remove("hidden");
     const canvas = document.createElement("canvas");
     canvas.width = 100;
     canvas.height = 100;
@@ -286,37 +268,36 @@ async function initCamera() {
       const finalFreqRange = Math.max(0, Math.min(500, adjustedFreqRange));
       if (modGain) {
         modGain.gain.linearRampToValueAtTime(finalFreqRange, audioCtx.currentTime + 0.02);
-        document.getElementById("modRangeValue").textContent = finalFreqRange.toFixed(1) + " Hz (Brightness: " + avgBrightness.toFixed(1) + ")";
+        document.getElementById("modRangeValue").textContent = `${finalFreqRange.toFixed(1)} Hz (Brightness: ${avgBrightness.toFixed(1)})`;
       }
       requestAnimationFrame(processCamera);
     }
     video.onloadedmetadata = () => requestAnimationFrame(processCamera);
     log("Camera initialized");
   } catch (err) {
-    log("Camera error: " + err.message);
+    log("Camera error: " + err.message, true);
   }
 }
 
 async function requestMotionPermission() {
-  if (typeof DeviceMotionEvent.requestPermission === "function") {
-    try {
-      await audioCtx.resume();
+  try {
+    await audioCtx?.resume();
+    if (typeof DeviceMotionEvent.requestPermission === "function") {
       const permission = await DeviceMotionEvent.requestPermission();
       if (permission === "granted") {
         motionActive = true;
         window.addEventListener("devicemotion", handleMotion);
         log("Motion access granted. Shake device to adjust modulation depth.");
       } else {
-        log("Motion permission denied.");
+        log("Motion permission denied.", true);
       }
-    } catch (err) {
-      log("Motion error: " + err.message);
+    } else {
+      motionActive = true;
+      window.addEventListener("devicemotion", handleMotion);
+      log("Motion enabled. Shake device to adjust modulation depth.");
     }
-  } else {
-    await audioCtx.resume();
-    motionActive = true;
-    window.addEventListener("devicemotion", handleMotion);
-    log("Motion enabled. Shake device to adjust modulation depth.");
+  } catch (err) {
+    log("Motion error: " + err.message, true);
   }
 }
 
@@ -324,7 +305,7 @@ function handleMotion(event) {
   if (!motionActive || !modGain) return;
   const accel = event.acceleration;
   if (!accel || accel.x === null) {
-    log("Motion data unavailable");
+    log("Motion data unavailable", true);
     return;
   }
   const magnitude = Math.sqrt(accel.x ** 2 + accel.y ** 2 + accel.z ** 2);
@@ -333,130 +314,129 @@ function handleMotion(event) {
   const adjustedFreqRange = (mappedMagnitude / 10) * maxFreqRangeChange;
   const finalFreqRange = Math.max(0, Math.min(500, adjustedFreqRange));
   modGain.gain.linearRampToValueAtTime(finalFreqRange, audioCtx.currentTime + 0.02);
-  document.getElementById("modRangeValue").textContent = finalFreqRange.toFixed(1) + " Hz (Shake: " + magnitude.toFixed(1) + "g)";
+  document.getElementById("modRangeValue").textContent = `${finalFreqRange.toFixed(1)} Hz (Shake: ${magnitude.toFixed(1)}g)`;
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  const lockBtn = document.getElementById("lockBtn");
-  const testBtn = document.getElementById("testBtn");
-  const toggleDirectionBtn = document.getElementById("toggleDirectionBtn");
-  const orientationBtn = document.getElementById("orientationBtn");
-  const motionBtn = document.getElementById("motionBtn");
-  const cameraBtn = document.getElementById("cameraBtn");
-  const baseFreqInput = document.getElementById("baseFreq");
-  const modRangeInput = document.getElementById("modRange");
-  const modRateInput = document.getElementById("modRate");
-  const waveformSelect = document.getElementById("waveform");
-
   compassSection = document.getElementById("compass-section");
   compassSvg = document.getElementById("compass");
   directionArrow = document.getElementById("direction-arrow");
   distanceDisplay = document.getElementById("distance-display");
 
-  if (!lockBtn || !testBtn || !toggleDirectionBtn || !orientationBtn || !motionBtn || !cameraBtn || !baseFreqInput || !modRangeInput || !modRateInput || !waveformSelect) {
-    log("One or more UI elements not found. Check HTML IDs.");
-    console.error("Missing elements:", { lockBtn, testBtn, toggleDirectionBtn, orientationBtn, motionBtn, cameraBtn, baseFreqInput, modRangeInput, modRateInput, waveformSelect });
+  const elements = {
+    lockBtn: document.getElementById("lockBtn"),
+    testBtn: document.getElementById("testBtn"),
+    toggleDirectionBtn: document.getElementById("toggleDirectionBtn"),
+    orientationBtn: document.getElementById("orientationBtn"),
+    motionBtn: document.getElementById("motionBtn"),
+    cameraBtn: document.getElementById("cameraBtn"),
+    baseFreqInput: document.getElementById("baseFreq"),
+    modRangeInput: document.getElementById("modRange"),
+    modRateInput: document.getElementById("modRate"),
+    waveformSelect: document.getElementById("waveform"),
+  };
+
+  if (Object.values(elements).some(el => !el)) {
+    log("One or more UI elements not found. Check HTML IDs.", true);
+    console.error("Missing elements:", elements);
     return;
   }
 
-  lockBtn.addEventListener("click", async () => {
+  elements.lockBtn.addEventListener("click", async () => {
     console.log("Lock GPS button clicked");
-    await audioCtx?.resume();
-    log("Initializing audio and GPS...");
-    const audioSuccess = await initAudio();
-    if (!audioSuccess) return;
+    await initAudio();
     await startGpsTracking();
     compassSection.style.display = "block";
   });
 
-  testBtn.addEventListener("click", async () => {
+  elements.testBtn.addEventListener("click", async () => {
     console.log("Test Audio button clicked");
-    await audioCtx?.resume();
     const audioSuccess = await initAudio();
     if (audioSuccess) updateModulation(10);
   });
 
-  toggleDirectionBtn.addEventListener("click", async () => {
+  elements.toggleDirectionBtn.addEventListener("click", async () => {
     await audioCtx?.resume();
     reverseMapping = !reverseMapping;
-    log("Frequency mapping " + (reverseMapping ? "reversed" : "normal"));
+    log(`Frequency mapping ${reverseMapping ? "reversed" : "normal"}`);
   });
 
-  orientationBtn.addEventListener("click", async () => {
-    console.log("Enable Orientation button clicked");
-    await audioCtx?.resume();
+  elements.orientationBtn.addEventListener("click", async () => {
+    console.log("Toggle Orientation button clicked");
     orientationActive = !orientationActive;
     if (orientationActive) {
-      requestOrientationPermission();
+      await initAudio();
+      await requestOrientationPermission();
     } else {
       window.removeEventListener("deviceorientation", handleOrientation);
       log("Orientation disabled");
     }
   });
 
-  cameraBtn.addEventListener("click", async () => {
+  elements.cameraBtn.addEventListener("click", async () => {
     console.log("Toggle Camera button clicked");
-    await audioCtx?.resume();
     cameraActive = !cameraActive;
     if (cameraActive) {
-      initCamera();
+      await initAudio();
+      await initCamera();
     } else {
       log("Camera disabled");
       const video = document.getElementById("video");
       if (video.srcObject) {
         video.srcObject.getTracks().forEach(track => track.stop());
+        video.classList.add("hidden");
       }
     }
   });
 
-  motionBtn.addEventListener("click", async () => {
+  elements.motionBtn.addEventListener("click", async () => {
     console.log("Toggle Accelerometer button clicked");
-    await audioCtx?.resume();
     motionActive = !motionActive;
     if (motionActive) {
-      requestMotionPermission();
+      await initAudio();
+      await requestMotionPermission();
     } else {
       window.removeEventListener("devicemotion", handleMotion);
       log("Accelerometer disabled");
     }
   });
 
-  baseFreqInput.addEventListener("input", async (e) => {
+  elements.baseFreqInput.addEventListener("input", async (e) => {
     await audioCtx?.resume();
     baseFreq = parseFloat(e.target.value);
-    document.getElementById("baseFreqValue").textContent = baseFreq + " Hz";
-    baseFreqInput.setAttribute("aria-valuenow", baseFreq);
+    document.getElementById("baseFreqValue").textContent = `${baseFreq} Hz`;
+    e.target.setAttribute("aria-valuenow", baseFreq);
     if (carrierOsc) {
       carrierOsc.frequency.linearRampToValueAtTime(baseFreq, audioCtx.currentTime + 0.02);
     }
   });
 
-  modRangeInput.addEventListener("input", async (e) => {
+  elements.modRangeInput.addEventListener("input", async (e) => {
     await audioCtx?.resume();
     freqRange = parseFloat(e.target.value);
-    document.getElementById("modRangeValue").textContent = freqRange + " Hz";
-    modRangeInput.setAttribute("aria-valuenow", freqRange);
+    document.getElementById("modRangeValue").textContent = `${freqRange} Hz`;
+    e.target.setAttribute("aria-valuenow", freqRange);
     if (modGain) {
       modGain.gain.linearRampToValueAtTime(freqRange, audioCtx.currentTime + 0.02);
     }
   });
 
-  modRateInput.addEventListener("input", async (e) => {
+  elements.modRateInput.addEventListener("input", async (e) => {
     await audioCtx?.resume();
     modRate = parseFloat(e.target.value);
-    document.getElementById("modRateValue").textContent = modRate + " Hz";
-    modRateInput.setAttribute("aria-valuenow", modRate);
+    document.getElementById("modRateValue").textContent = `${modRate} Hz`;
+    e.target.setAttribute("aria-valuenow", modRate);
     if (modulatorOsc) {
       modulatorOsc.frequency.linearRampToValueAtTime(modRate, audioCtx.currentTime + 0.02);
     }
   });
 
-  waveformSelect.addEventListener("change", async (e) => {
+  elements.waveformSelect.addEventListener("change", async (e) => {
     await audioCtx?.resume();
     waveform = e.target.value;
     if (carrierOsc) {
       carrierOsc.type = waveform;
     }
-    log("Waveform changed to " + waveform);
+    log(`Waveform changed to ${waveform}`);
   });
 });
