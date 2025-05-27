@@ -1,6 +1,9 @@
 GPS FM Synthesizer
+
 Overview
+
 The GPS FM Synthesizer is a web-based audio application that generates dynamic FM synthesis sounds modulated by real-world inputs: GPS location, device orientation, accelerometer, and camera brightness. Built with the Web Audio API, it creates an interactive soundscape where physical movement and environmental factors shape the audio output, ideal for experimental music, sound art, or location-based performances.
+
 Features
 
 GPS Tracking: Modulates the FM synthesis modulation depth based on the distance from a locked GPS position. Moving farther or closer adjusts the sound's intensity.
@@ -44,15 +47,12 @@ Verify Files:
 Ensure index.html references fm-synth.js correctly (case-sensitive).
 Check that both files are in the same directory.
 
-
-
 Usage
 
 Launch the App:
 
 Open http://localhost:8000 on a mobile device for full functionality (desktop browsers may lack sensors).
 Grant permissions for location, motion, and camera when prompted.
-
 
 Controls:
 
@@ -67,9 +67,7 @@ Base Frequency: Sets the carrier frequency (100–1000 Hz).
 Modulation Range: Sets the maximum modulation depth (0–500 Hz).
 Modulator Rate: Sets the base modulator frequency (0.1–50 Hz).
 
-
 Waveform: Selects the carrier waveform (sine, square, triangle, sawtooth).
-
 
 Interact:
 
@@ -77,13 +75,10 @@ Move to change GPS distance, tilt the device, shake it, or point the camera at d
 Monitor feedback in the UI (e.g., “300.0 Hz (Shake: 5.2g)” or “250.0 Hz (Brightness: 128.5)”).
 Adjust sliders for manual control.
 
-
 Status:
 
 The #status div displays messages (e.g., “Audio initialized,” “Camera disabled”).
 Check the browser console (F12) for detailed logs.
-
-
 
 Technical Details
 
@@ -95,25 +90,20 @@ DeviceMotion API: Measures acceleration for shake-based modulation.
 getUserMedia API: Accesses camera to compute brightness.
 HTML/CSS/JS: Responsive UI with sliders, buttons, and a hidden video element for camera input.
 
-
 Audio Optimizations:
 Linear ramping (20ms) for frequency and gain changes to prevent clicks.
 Audio context resumed on all user interactions to avoid suspension.
 Throttled camera processing (~10 FPS) to reduce CPU load.
 Proper oscillator cleanup in initAudio to prevent glitches.
 
-
 Compatibility:
 Uses string concatenation (e.g., "Status: " + msg) for ES5 compatibility, avoiding template literals.
 Tested on modern mobile browsers (Chrome, Safari).
-
 
 Limitations:
 Accelerometer and camera both affect freqRange, with the latest input taking precedence.
 GPS accuracy depends on device and environment (open areas improve performance).
 High CPU usage on low-end devices may cause minor delays.
-
-
 
 Troubleshooting
 
@@ -142,8 +132,6 @@ Check console for errors (e.g., “Camera error: NotAllowedError”).
 Editor Errors:
 Verify your editor supports JavaScript (ES5).
 Share linter settings (e.g., .eslintrc) if syntax issues arise.
-
-
 
 Future Enhancements
 
