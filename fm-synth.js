@@ -1,198 +1,451 @@
-// fm-synth.js
+let audioCtx = null;
+let carrierOsc = null;
+let modulatorOsc = null;
+let modGain = null;
+let lockPosition = null;
+let reverseMapping = false;
+let watchId = null;
+let orientationActive = false;
+let motionActive = false;
+let cameraActive = false;
+let currentHeading = 0;
 
-let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-let baseFreqInput = document.getElementById('baseFreq');
-let modRangeInput = document.getElementById('modRange');
-let modRateInput = document.getElementById('modRate');
-let waveformSelect = document.getElementById('waveform');
+let baseFreq = 440;
+let freqRange = 200;
+let modRate = 4;
+let waveform = 'sine';
+let distanceBand = 50; // Default distance band in meters
 
-let oscillator, modulator, modGain;
-let isPlaying = false;
+const statusEl = document.getElementById("status");
+let compassSection = null;
+let compassSvg = null;
+let directionArrow = null;
+let distanceDisplay = null;
 
-let midiAccess = null;
-let midiOutput = null;
-let lockedPosition = null;
-const statusDiv = document.getElementById('status');
-const lockBtn = document.getElementById('lockBtn');
-
-lockBtn.addEventListener('click', () => {
-  if (!navigator.geolocation) {
-    statusDiv.textContent = "Geolocation not supported by your browser.";
-    statusDiv.className = "status error";
-    return;
+function log(msg, isError = false) {
+  console.log(msg);
+  if (statusEl) {
+    statusEl.textContent = `Status: ${msg}`;
+    statusEl.className = `status ${isError ? 'error' : 'success'}`;
   }
-  statusDiv.textContent = "Locking GPS position...";
-  statusDiv.className = "status";
+}
 
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      lockedPosition = {
-        latitude: pos.coords.latitude,
-        longitude: pos.coords.longitude,
-        accuracy: pos.coords.accuracy,
-      };
-      statusDiv.textContent = `GPS Locked: Lat ${lockedPosition.latitude.toFixed(5)}, Lon ${lockedPosition.longitude.toFixed(5)} (±${lockedPosition.accuracy}m)`;
-      statusDiv.className = "status success";
-      console.log("GPS locked:", lockedPosition);
-    },
-    (err) => {
-      statusDiv.textContent = `Error locking GPS: ${err.message}`;
-      statusDiv.className = "status error";
-      console.error("GPS error:", err);
-    },
-    {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 0,
+async function initAudio() {
+  try {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
-  );
-});
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume();
+      log("Audio context resumed");
+    }
 
+    // Clean up existing oscillators
+    if (carrierOsc) {
+      carrierOsc.stop();
+      carrierOsc.disconnect();
+    }
+    if (modulatorOsc) {
+      modulatorOsc.stop();
+      modulatorOsc.disconnect();
+    }
+    if (modGain) {
+      modGain.disconnect();
+    }
 
-function setupMIDI() {
-  if (!navigator.requestMIDIAccess) {
-    console.warn("Web MIDI API not supported in this browser.");
+    // Create new audio nodes
+    carrierOsc = audioCtx.createOscillator();
+    carrierOsc.type = waveform;
+    carrierOsc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
+
+    modulatorOsc = audioCtx.createOscillator();
+    modulatorOsc.type = 'sine';
+    modulatorOsc.frequency.setValueAtTime(modRate, audioCtx.currentTime);
+
+    modGain = audioCtx.createGain();
+    modGain.gain.setValueAtTime(freqRange, audioCtx.currentTime);
+
+    modulatorOsc.connect(modGain);
+    modGain.connect(carrierOsc.frequency);
+    carrierOsc.connect(audioCtx.destination);
+
+    carrierOsc.start();
+    modulatorOsc.start();
+
+    log("Audio initialized");
+    return true;
+  } catch (err) {
+    log("Audio error: " + err.message, true);
+    return false;
+  }
+}
+
+function updateModulation(distance) {
+  if (!carrierOsc || !modGain) {
+    log("Audio nodes not initialized", true);
     return;
   }
-  navigator.requestMIDIAccess()
-    .then((access) => {
-      midiAccess = access;
-      const outputs = Array.from(midiAccess.outputs.values());
-      console.log("MIDI Outputs:", outputs.map(o => o.name));
+  
+  // Normalize distance relative to selected distance band
+  const normalizedDistance = Math.min(Math.max(distance / distanceBand, 0), 1);
+  const modDepthHz = reverseMapping 
+    ? (1 - normalizedDistance) * freqRange 
+    : normalizedDistance * freqRange;
 
-      // Try to find a virtual MIDI port automatically; adjust this string as needed
-      midiOutput = outputs.find(o => o.name.includes("IAC") || o.name.includes("loopMIDI"));
-      if (!midiOutput && outputs.length > 0) {
-        // fallback to first output if no virtual port found
-        midiOutput = outputs[0];
-      }
-      if (midiOutput) {
-        console.log("Using MIDI Output:", midiOutput.name);
-      } else {
-        console.warn("No MIDI output found.");
-      }
-    })
-    .catch((err) => {
-      console.error("Failed to get MIDI access", err);
-    });
+  const now = audioCtx.currentTime;
+  modGain.gain.linearRampToValueAtTime(modDepthHz, now + 0.02);
+  carrierOsc.frequency.linearRampToValueAtTime(baseFreq, now + 0.02);
 }
 
-function sendMIDINoteOn(note, velocity = 127, channel = 0) {
-  if (!midiOutput) return;
-  // 0x90 = note on for channel 1, so add channel offset
-  midiOutput.send([0x90 + channel, note, velocity]);
+function updateCompassDisplay(distance, bearing) {
+  if (!compassSection || !directionArrow || !distanceDisplay) return;
+  
+  const arrowRotation = bearing - currentHeading;
+  directionArrow.setAttribute('transform', `rotate(${-arrowRotation}, 100, 100)`);
+  distanceDisplay.textContent = `${distance.toFixed(0)}m`;
 }
 
-function sendMIDINoteOff(note, velocity = 0, channel = 0) {
-  if (!midiOutput) return;
-  midiOutput.send([0x80 + channel, note, velocity]);
+function calculateBearing(coords1, coords2) {
+  const φ1 = coords1.latitude * Math.PI / 180;
+  const φ2 = coords2.latitude * Math.PI / 180;
+  const λ1 = coords1.longitude * Math.PI / 180;
+  const λ2 = coords2.longitude * Math.PI / 180;
+  
+  const y = Math.sin(λ2 - λ1) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - 
+            Math.sin(φ1) * Math.cos(φ2) * Math.cos(λ2 - λ1);
+  const θ = Math.atan2(y, x);
+  
+  return (θ * 180 / Math.PI + 360) % 360;
 }
 
-function sendMIDIControlChange(controller, value, channel = 0) {
-  if (!midiOutput) return;
-  midiOutput.send([0xB0 + channel, controller, value]);
-}
-
-function frequencyToMIDINote(freq) {
-  // MIDI note number = 69 + 12*log2(freq/440)
-  return Math.round(69 + 12 * Math.log2(freq / 440));
-}
-
-function startSynth() {
-  oscillator = audioCtx.createOscillator();
-  modulator = audioCtx.createOscillator();
-  modGain = audioCtx.createGain();
-
-  oscillator.type = waveformSelect.value;
-  oscillator.frequency.value = parseFloat(baseFreqInput.value);
-
-  modulator.frequency.value = parseFloat(modRateInput.value);
-  modGain.gain.value = parseFloat(modRangeInput.value);
-
-  modulator.connect(modGain);
-  modGain.connect(oscillator.frequency);
-  oscillator.connect(audioCtx.destination);
-
-  oscillator.start();
-  modulator.start();
-
-  isPlaying = true;
-
-  // Send MIDI Note On based on current frequency
-  let freq = oscillator.frequency.value;
-  let midiNote = frequencyToMIDINote(freq);
-  sendMIDINoteOn(midiNote);
-
-  console.log(`Synth started at freq: ${freq}Hz, MIDI note: ${midiNote}`);
-}
-
-function stopSynth() {
-  if (!isPlaying) return;
-
-  let freq = oscillator.frequency.value;
-  let midiNote = frequencyToMIDINote(freq);
-  sendMIDINoteOff(midiNote);
-
-  oscillator.stop();
-  modulator.stop();
-
-  oscillator.disconnect();
-  modulator.disconnect();
-  modGain.disconnect();
-
-  isPlaying = false;
-
-  console.log(`Synth stopped, MIDI note off sent for note: ${midiNote}`);
-}
-
-function updateSynth() {
-  if (!isPlaying) return;
-
-  oscillator.type = waveformSelect.value;
-  oscillator.frequency.value = parseFloat(baseFreqInput.value);
-  modulator.frequency.value = parseFloat(modRateInput.value);
-  modGain.gain.value = parseFloat(modRangeInput.value);
-
-  // Send updated MIDI note if frequency changed
-  let freq = oscillator.frequency.value;
-  let midiNote = frequencyToMIDINote(freq);
-
-  // For simplicity, send Note On for new note, Note Off for old note could be managed if tracking notes
-  // Here we just send a CC message with frequency info for continuous control
-  sendMIDIControlChange(74, Math.min(127, Math.floor(freq / 10))); // CC74 = Brightness, as an example
-
-  console.log(`Synth updated freq: ${freq}Hz, MIDI note approx: ${midiNote}`);
-}
-
-// UI event listeners
-document.getElementById('testBtn').addEventListener('click', () => {
-  if (isPlaying) {
-    stopSynth();
-  } else {
-    startSynth();
+async function startGpsTracking() {
+  if (!navigator.geolocation) {
+    log("Geolocation not supported by this browser or device.", true);
+    return;
   }
-});
 
-baseFreqInput.addEventListener('input', () => {
-  document.getElementById('baseFreqValue').textContent = baseFreqInput.value + " Hz";
-  updateSynth();
-});
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    log("Cleared previous GPS watch");
+  }
 
-modRangeInput.addEventListener('input', () => {
-  document.getElementById('modRangeValue').textContent = modRangeInput.value + " Hz";
-  updateSynth();
-});
+  try {
+    const position = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      });
+    });
+    lockPosition = position.coords;
+    log(`GPS position locked: Lat ${lockPosition.latitude.toFixed(4)}, Lon ${lockPosition.longitude.toFixed(4)}`);
 
-modRateInput.addEventListener('input', () => {
-  document.getElementById('modRateValue').textContent = modRateInput.value + " Hz";
-  updateSynth();
-});
+    watchId = navigator.geolocation.watchPosition(
+      pos => {
+        if (!lockPosition) {
+          log("Lock position not set", true);
+          return;
+        }
+        const distance = calculateDistance(pos.coords, lockPosition);
+        updateModulation(distance);
+        
+        if (currentHeading !== null) {
+          const bearing = calculateBearing(pos.coords, lockPosition);
+          updateCompassDisplay(distance, bearing);
+        }
+      },
+      err => {
+        log(`GPS error: ${err.message}`, true);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  } catch (err) {
+    log(`GPS error: ${err.message}`, true);
+  }
+}
 
-waveformSelect.addEventListener('change', () => {
-  updateSynth();
-});
+function calculateDistance(coords1, coords2) {
+  if (!coords1 || !coords2 || !coords1.latitude || !coords2.latitude) {
+    log("Invalid coordinates for distance calculation", true);
+    return 0;
+  }
+  const R = 6371e3;
+  const φ1 = coords1.latitude * Math.PI / 180;
+  const φ2 = coords2.latitude * Math.PI / 180;
+  const Δφ = (coords2.latitude - coords1.latitude) * Math.PI / 180;
+  const Δλ = (coords2.longitude - coords1.longitude) * Math.PI / 180;
 
-// Initialize MIDI on load
-window.addEventListener('load', () => {
-  setupMIDI();
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}
+
+function handleOrientation(event) {
+  if (!orientationActive || !modulatorOsc) return;
+
+  const beta = event.beta;
+  const alpha = event.alpha;
+  
+  if (beta === null || alpha === null) {
+    log("Orientation data unavailable", true);
+    return;
+  }
+
+  currentHeading = alpha;
+  
+  const maxModRateChange = 5;
+  const modRateOffset = (beta / 180) * maxModRateChange;
+  const adjustedModRate = modRate + modRateOffset;
+  const finalModRate = Math.max(0.1, Math.min(50, adjustedModRate));
+  modulatorOsc.frequency.linearRampToValueAtTime(finalModRate, audioCtx.currentTime + 0.02);
+  document.getElementById("modRateValue").textContent = `${finalModRate.toFixed(1)} Hz (Tilt: ${beta.toFixed(1)}°)`;
+  
+  if (lockPosition) {
+    navigator.geolocation.getCurrentPosition(pos => {
+      const distance = calculateDistance(pos.coords, lockPosition);
+      const bearing = calculateBearing(pos.coords, lockPosition);
+      updateCompassDisplay(distance, bearing);
+    });
+  }
+}
+
+async function requestOrientationPermission() {
+  try {
+    await audioCtx?.resume();
+    if (typeof DeviceOrientationEvent.requestPermission === "function") {
+      const permission = await DeviceOrientationEvent.requestPermission();
+      if (permission === "granted") {
+        orientationActive = true;
+        window.addEventListener("deviceorientation", handleOrientation);
+        log("Orientation access granted. Tilt device to adjust modulator frequency.");
+      } else {
+        log("Orientation permission denied.", true);
+      }
+    } else {
+      orientationActive = true;
+      window.addEventListener("deviceorientation", handleOrientation);
+      log("Orientation enabled. Tilt device to adjust modulator frequency.");
+    }
+  } catch (err) {
+    log("Orientation error: " + err.message, true);
+  }
+}
+
+async function initCamera() {
+  try {
+    await audioCtx?.resume();
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    const video = document.getElementById("video");
+    video.srcObject = stream;
+    video.classList.remove("hidden");
+    const canvas = document.createElement("canvas");
+    canvas.width = 100;
+    canvas.height = 100;
+    const ctx = canvas.getContext("2d");
+
+    let lastUpdate = 0;
+    function processCamera(timestamp) {
+      if (!cameraActive) return;
+      if (timestamp - lastUpdate < 100) {
+        requestAnimationFrame(processCamera);
+        return;
+      }
+      lastUpdate = timestamp;
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let sum = 0;
+      for (let i = 0; i < imageData.data.length; i += 4) {
+        const brightness = (imageData.data[i] + imageData.data[i + 1] + imageData.data[i + 2]) / 3;
+        sum += brightness;
+      }
+      const avgBrightness = sum / (imageData.data.length / 4);
+      const normalizedBrightness = avgBrightness / 255;
+      const adjustedFreqRange = normalizedBrightness * 500;
+      const finalFreqRange = Math.max(0, Math.min(500, adjustedFreqRange));
+      if (modGain) {
+        modGain.gain.linearRampToValueAtTime(finalFreqRange, audioCtx.currentTime + 0.02);
+        document.getElementById("modRangeValue").textContent = `${finalFreqRange.toFixed(1)} Hz (Brightness: ${avgBrightness.toFixed(1)})`;
+      }
+      requestAnimationFrame(processCamera);
+    }
+    video.onloadedmetadata = () => requestAnimationFrame(processCamera);
+    log("Camera initialized");
+  } catch (err) {
+    log("Camera error: " + err.message, true);
+  }
+}
+
+async function requestMotionPermission() {
+  try {
+    await audioCtx?.resume();
+    if (typeof DeviceMotionEvent.requestPermission === "function") {
+      const permission = await DeviceMotionEvent.requestPermission();
+      if (permission === "granted") {
+        motionActive = true;
+        window.addEventListener("devicemotion", handleMotion);
+        log("Motion access granted. Shake device to adjust modulation depth.");
+      } else {
+        log("Motion permission denied.", true);
+      }
+    } else {
+      motionActive = true;
+      window.addEventListener("devicemotion", handleMotion);
+      log("Motion enabled. Shake device to adjust modulation depth.");
+    }
+  } catch (err) {
+    log("Motion error: " + err.message, true);
+  }
+}
+
+function handleMotion(event) {
+  if (!motionActive || !modGain) return;
+  const accel = event.acceleration;
+  if (!accel || accel.x === null) {
+    log("Motion data unavailable", true);
+    return;
+  }
+  const magnitude = Math.sqrt(accel.x ** 2 + accel.y ** 2 + accel.z ** 2);
+  const maxFreqRangeChange = 500;
+  const mappedMagnitude = Math.min(magnitude, 10);
+  const adjustedFreqRange = (mappedMagnitude / 10) * maxFreqRangeChange;
+  const finalFreqRange = Math.max(0, Math.min(500, adjustedFreqRange));
+  modGain.gain.linearRampToValueAtTime(finalFreqRange, audioCtx.currentTime + 0.02);
+  document.getElementById("modRangeValue").textContent = `${finalFreqRange.toFixed(1)} Hz (Shake: ${magnitude.toFixed(1)}g)`;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  compassSection = document.getElementById("compass-section");
+  compassSvg = document.getElementById("compass");
+  directionArrow = document.getElementById("direction-arrow");
+  distanceDisplay = document.getElementById("distance-display");
+
+  const elements = {
+    lockBtn: document.getElementById("lockBtn"),
+    testBtn: document.getElementById("testBtn"),
+    toggleDirectionBtn: document.getElementById("toggleDirectionBtn"),
+    orientationBtn: document.getElementById("orientationBtn"),
+    motionBtn: document.getElementById("motionBtn"),
+    cameraBtn: document.getElementById("cameraBtn"),
+    baseFreqInput: document.getElementById("baseFreq"),
+    modRangeInput: document.getElementById("modRange"),
+    modRateInput: document.getElementById("modRate"),
+    waveformSelect: document.getElementById("waveform"),
+    distanceBandSelect: document.getElementById("distanceBand"),
+  };
+
+  if (Object.values(elements).some(el => !el)) {
+    log("One or more UI elements not found. Check HTML IDs.", true);
+    console.error("Missing elements:", elements);
+    return;
+  }
+
+  elements.lockBtn.addEventListener("click", async () => {
+    console.log("Lock GPS button clicked");
+    await initAudio();
+    await startGpsTracking();
+    compassSection.style.display = "block";
+  });
+
+  elements.testBtn.addEventListener("click", async () => {
+    console.log("Test Audio button clicked");
+    const audioSuccess = await initAudio();
+    if (audioSuccess) updateModulation(10);
+  });
+
+  elements.toggleDirectionBtn.addEventListener("click", async () => {
+    await audioCtx?.resume();
+    reverseMapping = !reverseMapping;
+    log(`Frequency mapping ${reverseMapping ? "reversed" : "normal"}`);
+  });
+
+  elements.orientationBtn.addEventListener("click", async () => {
+    console.log("Toggle Orientation button clicked");
+    orientationActive = !orientationActive;
+    if (orientationActive) {
+      await initAudio();
+      await requestOrientationPermission();
+    } else {
+      window.removeEventListener("deviceorientation", handleOrientation);
+      log("Orientation disabled");
+    }
+  });
+
+  elements.cameraBtn.addEventListener("click", async () => {
+    console.log("Toggle Camera button clicked");
+    cameraActive = !cameraActive;
+    if (cameraActive) {
+      await initAudio();
+      await initCamera();
+    } else {
+      log("Camera disabled");
+      const video = document.getElementById("video");
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+        video.classList.add("hidden");
+      }
+    }
+  });
+
+  elements.motionBtn.addEventListener("click", async () => {
+    console.log("Toggle Accelerometer button clicked");
+    motionActive = !motionActive;
+    if (motionActive) {
+      await initAudio();
+      await requestMotionPermission();
+    } else {
+      window.removeEventListener("devicemotion", handleMotion);
+      log("Accelerometer disabled");
+    }
+  });
+
+  elements.baseFreqInput.addEventListener("input", async (e) => {
+    await audioCtx?.resume();
+    baseFreq = parseFloat(e.target.value);
+    document.getElementById("baseFreqValue").textContent = `${baseFreq} Hz`;
+    e.target.setAttribute("aria-valuenow", baseFreq);
+    if (carrierOsc) {
+      carrierOsc.frequency.linearRampToValueAtTime(baseFreq, audioCtx.currentTime + 0.02);
+    }
+  });
+
+  elements.modRangeInput.addEventListener("input", async (e) => {
+    await audioCtx?.resume();
+    freqRange = parseFloat(e.target.value);
+    document.getElementById("modRangeValue").textContent = `${freqRange} Hz`;
+    e.target.setAttribute("aria-valuenow", freqRange);
+    if (modGain) {
+      modGain.gain.linearRampToValueAtTime(freqRange, audioCtx.currentTime + 0.02);
+    }
+  });
+
+  elements.modRateInput.addEventListener("input", async (e) => {
+    await audioCtx?.resume();
+    modRate = parseFloat(e.target.value);
+    document.getElementById("modRateValue").textContent = `${modRate} Hz`;
+    e.target.setAttribute("aria-valuenow", modRate);
+    if (modulatorOsc) {
+      modulatorOsc.frequency.linearRampToValueAtTime(modRate, audioCtx.currentTime + 0.02);
+    }
+  });
+
+  elements.waveformSelect.addEventListener("change", async (e) => {
+    await audioCtx?.resume();
+    waveform = e.target.value;
+    if (carrierOsc) {
+      carrierOsc.type = waveform;
+    }
+    log(`Waveform changed to ${waveform}`);
+  });
+
+  elements.distanceBandSelect.addEventListener("change", async (e) => {
+    await audioCtx?.resume();
+    distanceBand = parseFloat(e.target.value);
+    log(`Distance band changed to ${distanceBand} meters`);
+  });
 });
