@@ -16,7 +16,15 @@ const statusEl = document.getElementById("status");
 
 function log(msg) {
   console.log(msg);
-  if (statusEl) statusEl.textContent = "Status: " + msg;
+  if (statusEl) {
+    statusEl.textContent = "Status: " + msg;
+    // Add success or error class based on message content
+    if (msg.includes("error") || msg.includes("denied") || msg.includes("unavailable")) {
+      statusEl.className = "status error";
+    } else {
+      statusEl.className = "status success";
+    }
+  }
 }
 
 async function initAudio() {
@@ -82,7 +90,6 @@ function updateModulation(distance) {
     : (mapped / 100) * freqRange;
 
   const now = audioCtx.currentTime;
-  // Smooth transitions to avoid clicks
   modGain.gain.linearRampToValueAtTime(modDepthHz, now + 0.02);
   carrierOsc.frequency.linearRampToValueAtTime(baseFreq, now + 0.02);
 }
@@ -177,7 +184,6 @@ function handleOrientation(event) {
   const modRateOffset = (beta / 180) * maxModRateChange;
   const adjustedModRate = modRate + modRateOffset;
   const finalModRate = Math.max(0.1, Math.min(50, adjustedModRate));
-  // Smooth transition
   modulatorOsc.frequency.linearRampToValueAtTime(finalModRate, audioCtx.currentTime + 0.02);
   document.getElementById("modRateValue").textContent = finalModRate.toFixed(1) + " Hz (Tilt: " + beta.toFixed(1) + "°)";
 }
@@ -185,7 +191,7 @@ function handleOrientation(event) {
 async function requestOrientationPermission() {
   if (typeof DeviceOrientationEvent.requestPermission === "function") {
     try {
-      await audioCtx.resume(); // Ensure audio context is active
+      await audioCtx.resume();
       const permission = await DeviceOrientationEvent.requestPermission();
       if (permission === "granted") {
         orientationActive = true;
@@ -207,7 +213,7 @@ async function requestOrientationPermission() {
 
 async function initCamera() {
   try {
-    await audioCtx.resume(); // Ensure audio context is active
+    await audioCtx.resume();
     const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
     const video = document.getElementById("video");
     video.srcObject = stream;
@@ -219,7 +225,6 @@ async function initCamera() {
     let lastUpdate = 0;
     function processCamera(timestamp) {
       if (!cameraActive) return;
-      // Throttle to ~10 FPS
       if (timestamp - lastUpdate < 100) {
         requestAnimationFrame(processCamera);
         return;
@@ -238,7 +243,6 @@ async function initCamera() {
       const adjustedFreqRange = normalizedBrightness * 500;
       const finalFreqRange = Math.max(0, Math.min(500, adjustedFreqRange));
       if (modGain) {
-        // Smooth transition
         modGain.gain.linearRampToValueAtTime(finalFreqRange, audioCtx.currentTime + 0.02);
         document.getElementById("modRangeValue").textContent = finalFreqRange.toFixed(1) + " Hz (Brightness: " + avgBrightness.toFixed(1) + ")";
       }
@@ -254,7 +258,7 @@ async function initCamera() {
 async function requestMotionPermission() {
   if (typeof DeviceMotionEvent.requestPermission === "function") {
     try {
-      await audioCtx.resume(); // Ensure audio context is active
+      await audioCtx.resume();
       const permission = await DeviceMotionEvent.requestPermission();
       if (permission === "granted") {
         motionActive = true;
@@ -286,7 +290,6 @@ function handleMotion(event) {
   const mappedMagnitude = Math.min(magnitude, 10);
   const adjustedFreqRange = (mappedMagnitude / 10) * maxFreqRangeChange;
   const finalFreqRange = Math.max(0, Math.min(500, adjustedFreqRange));
-  // Smooth transition
   modGain.gain.linearRampToValueAtTime(finalFreqRange, audioCtx.currentTime + 0.02);
   document.getElementById("modRangeValue").textContent = finalFreqRange.toFixed(1) + " Hz (Shake: " + magnitude.toFixed(1) + "g)";
 }
@@ -374,6 +377,7 @@ document.addEventListener("DOMContentLoaded", () => {
     await audioCtx?.resume();
     baseFreq = parseFloat(e.target.value);
     document.getElementById("baseFreqValue").textContent = baseFreq + " Hz";
+    baseFreqInput.setAttribute("aria-valuenow", baseFreq);
     if (carrierOsc) {
       carrierOsc.frequency.linearRampToValueAtTime(baseFreq, audioCtx.currentTime + 0.02);
     }
@@ -383,6 +387,7 @@ document.addEventListener("DOMContentLoaded", () => {
     await audioCtx?.resume();
     freqRange = parseFloat(e.target.value);
     document.getElementById("modRangeValue").textContent = freqRange + " Hz";
+    modRangeInput.setAttribute("aria-valuenow", freqRange);
     if (modGain) {
       modGain.gain.linearRampToValueAtTime(freqRange, audioCtx.currentTime + 0.02);
     }
@@ -392,6 +397,7 @@ document.addEventListener("DOMContentLoaded", () => {
     await audioCtx?.resume();
     modRate = parseFloat(e.target.value);
     document.getElementById("modRateValue").textContent = modRate + " Hz";
+    modRateInput.setAttribute("aria-valuenow", modRate);
     if (modulatorOsc) {
       modulatorOsc.frequency.linearRampToValueAtTime(modRate, audioCtx.currentTime + 0.02);
     }
